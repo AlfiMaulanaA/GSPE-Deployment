@@ -1,17 +1,24 @@
 #!/bin/bash
 
-# GSPE Deployment Script
-# Usage: ./deploy.sh [up|down|logs|restart]
+# GSPE Deployment Script (Registry-First)
+# Usage: ./deploy.sh [up|down|logs|pull]
 
 COMMAND=${1:-up}
+IMAGE_NAME="ghcr.io/alfimaulanaa/gspe-deployment:latest"
 
 case $COMMAND in
   "up")
-    echo "🚀 Starting GSPE Deployment..."
-    docker-compose up -d --build
+    echo "🚀 Pulling latest image..."
+    docker pull $IMAGE_NAME
+    echo "🚀 Starting services..."
+    docker-compose up -d
     echo "🔄 Running database migrations..."
     docker exec gspe-app npx prisma db push
     echo "✅ Deployment complete!"
+    ;;
+  "pull")
+    echo "🚀 Pulling latest image..."
+    docker pull $IMAGE_NAME
     ;;
   "down")
     echo "🛑 Stopping services..."
@@ -20,12 +27,8 @@ case $COMMAND in
   "logs")
     docker-compose logs -f app
     ;;
-  "restart")
-    echo "🔄 Restarting services..."
-    docker-compose restart app
-    ;;
   *)
-    echo "Usage: $0 [up|down|logs|restart]"
+    echo "Usage: $0 [up|down|logs|pull]"
     exit 1
     ;;
 esac

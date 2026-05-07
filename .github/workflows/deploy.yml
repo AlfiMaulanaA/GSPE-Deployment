@@ -1,45 +1,49 @@
-name: CI/CD Pipeline
+name: CI/CD Pipeline (Registry-First)
 
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
 
 jobs:
-  build-and-test:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
         with:
-          node-version: '20'
-          cache: 'npm'
+          platforms: 'arm64'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Generate Prisma Client
-        run: npx prisma generate
-        env:
-          DATABASE_URL: "postgresql://dummy:dummy@localhost:5432/dummy"
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Type Check & Lint
-        run: |
-          npm run lint
-          npx tsc --noEmit
-
-      - name: Build Application
-        run: npm run build
-        env:
-          DATABASE_URL: "postgresql://dummy:dummy@localhost:5432/dummy"
-          NEXT_TELEMETRY_DISABLED: 1
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/gspe-deployment:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy
 
   deploy:
-    needs: build-and-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
@@ -49,7 +53,18 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           script: |
+            mkdir -p ~/gspe-deployment
             cd ~/gspe-deployment
-            git pull origin main
-            docker-compose up -d --build
+            
+            # Download docker-compose.yml saja dari repo (opsional, jika sudah ada tidak apa-apa)
+            curl -O https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml
+            
+            # Login ke registry di Raspi
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Pull image terbaru dan restart
+            docker-compose pull
+            docker-compose up -d
+            
+            # Jalankan migrasi database
             docker exec gspe-app npx prisma db push

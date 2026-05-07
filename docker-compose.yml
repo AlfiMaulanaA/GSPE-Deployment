@@ -1,8 +1,6 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/alfimaulanaa/gspe-deployment:latest
     container_name: gspe-app
     restart: always
     ports:
