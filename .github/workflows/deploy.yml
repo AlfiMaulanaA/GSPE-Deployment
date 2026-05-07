@@ -30,13 +30,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Lowercase image name
+        run: |
+          echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/gspe-deployment" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/gspe-deployment:latest
+          tags: ${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -46,6 +50,10 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - name: Lowercase image name for deploy
+        run: |
+          echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/gspe-deployment" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@master
         with:
@@ -56,14 +64,15 @@ jobs:
             mkdir -p ~/gspe-deployment
             cd ~/gspe-deployment
             
-            # Download docker-compose.yml saja dari repo (opsional, jika sudah ada tidak apa-apa)
-            curl -O https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml
-            
             # Login ke registry di Raspi
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
             # Pull image terbaru dan restart
-            docker-compose pull
+            # Kita gunakan variabel lingkungan di shell SSH
+            IMAGE_NAME=$(echo "ghcr.io/${{ github.repository_owner }}/gspe-deployment" | tr '[:upper:]' '[:lower:]')
+            
+            # Update docker-compose image name on the fly if needed or just use the updated file
+            docker pull $IMAGE_NAME:latest
             docker-compose up -d
             
             # Jalankan migrasi database
