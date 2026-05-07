@@ -15,8 +15,14 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 
-# Generate Client dan Build (Prisma 7 akan mendeteksi prisma.config.js secara otomatis)
+# Generate Client
 RUN npx prisma generate
+
+# Bundle Seed Script (Agar tidak butuh node_modules saat running)
+# Kita gunakan esbuild yang sudah ada di node_modules atau pasang sesaat
+RUN npx esbuild prisma/seed.ts --bundle --platform=node --outfile=prisma/seed.js --external:@prisma/client
+
+# Build Next.js
 RUN npm run build
 
 # Stage 3: Runner
@@ -26,13 +32,12 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Install PRISMA dan TSX secara global
-RUN npm install -g prisma@7.8.0 tsx
+# Install PRISMA global (Hanya prisma, tidak butuh tsx lagi)
+RUN npm install -g prisma@7.8.0
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Salin file publik, skema, dan KONFIGURASI JS
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.js ./prisma.config.js
@@ -40,6 +45,7 @@ COPY --from=builder /app/package.json ./package.json
 
 # Salin standalone build
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs

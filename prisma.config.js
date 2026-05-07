@@ -3,7 +3,7 @@ export default {
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
-    seed: "tsx prisma/seed.ts"
+    seed: "node prisma/seed.js" // Menjalankan file hasil bundle
   },
   datasource: {
     url: process.env.DATABASE_URL
