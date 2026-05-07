@@ -50,19 +50,25 @@ jobs:
         run: |
           cd ~/GSPE-Deployment
           
-          # Konfigurasi agar git pull tidak minta password (menggunakan GITHUB_TOKEN)
+          # Paksa git untuk mengabaikan perubahan lokal jika ada
+          git fetch origin main
+          git reset --hard origin/main
+          
+          # Konfigurasi token untuk pull
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git pull origin main
           
-          # Ambil update docker-compose.yml terbaru
-          git pull
-          
-          # Login ke registry agar bisa pull image private
+          # Login ke registry
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # Pull image terbaru dan jalankan (menggunakan 'docker compose' tanpa tanda hubung)
+          # Refresh container
           docker compose pull
           docker compose up -d
           
+          # Beri waktu 10 detik agar database siap
+          echo "Waiting for database to be ready..."
+          sleep 10
+          
           # Sinkronisasi Database
-          docker exec gspe-app npx prisma db push
-          docker exec gspe-app npx prisma db seed -- --f
+          docker exec gspe-app npx prisma db push --accept-data-loss
+          docker exec gspe-app npx prisma db seed
