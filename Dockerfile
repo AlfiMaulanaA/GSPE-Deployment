@@ -1,4 +1,4 @@
-# Dependencies
+# Stage 1: Dependencies
 FROM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Builder
+# Stage 2: Builder
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -18,24 +18,24 @@ ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 RUN npx prisma generate
 RUN npm run build
 
-# Runner
+# Stage 3: Runner
 FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Install PRISMA dan TSX secara global agar seeding berjalan mulus
+RUN npm install -g prisma@7.8.0 tsx
+
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Salin folder public
 COPY --from=builder /app/public ./public
-
-# PENTING: Salin folder prisma dan konfigurasinya agar bisa db push/seed di produksi
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder /app/package.json ./package.json
 
-# Salin hasil build standalone
+# Salin standalone build
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
