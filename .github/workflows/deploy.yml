@@ -36,7 +36,6 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          # Menggunakan nama langsung dengan huruf kecil untuk menghindari error variabel
           tags: ghcr.io/alfimaulanaa/gspe-deployment:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -54,19 +53,18 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           script: |
-            mkdir -p ~/gspe-deployment
-            cd ~/gspe-deployment
+            cd ~/GSPE-Deployment
             
-            # Login ke registry di Raspi
+            # Login ke registry agar bisa pull image private
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # Pull image terbaru dan restart menggunakan nama fix
-            docker pull ghcr.io/alfimaulanaa/gspe-deployment:latest
+            # Ambil update docker-compose.yml terbaru
+            git pull
             
-            # Download docker-compose terbaru jika ada perubahan
-            curl -sSL https://raw.githubusercontent.com/AlfiMaulanaA/GSPE-Deployment/main/docker-compose.yml -o docker-compose.yml
-            
+            # Pull image terbaru dan jalankan
+            docker-compose pull
             docker-compose up -d
             
-            # Jalankan migrasi database
+            # Sinkronisasi Database
             docker exec gspe-app npx prisma db push
+            docker exec gspe-app npx prisma db seed -- --f
