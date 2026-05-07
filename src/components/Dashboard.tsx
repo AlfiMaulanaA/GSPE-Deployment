@@ -15,7 +15,7 @@ export default function Dashboard() {
     totalValue: 0
   })
   const [loading, setLoading] = useState(true)
-  
+
   // State untuk Modal Form
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
@@ -73,10 +73,10 @@ export default function Dashboard() {
       {/* Header */}
       <header className="flex justify-between items-center bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/20 shadow-xl">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">GSPE Product Dashboard</h1>
+          <h1 className="text-3xl font-bold text-white tracking-tight">GSPE Product Dashboard Alfi Maulana DevOps</h1>
           <p className="text-white/60">Manage your industrial inventory with style.</p>
         </div>
-        <button 
+        <button
           onClick={handleAddNew}
           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-blue-600/30 transition-all active:scale-95"
         >
@@ -107,7 +107,7 @@ export default function Dashboard() {
           <h2 className="text-xl font-semibold text-white">Product Inventory</h2>
           <span className="text-white/40 text-sm">{products.length} Items Found</span>
         </div>
-        
+
         <div className="grid grid-cols-1 gap-4">
           {products.map((p) => (
             <div key={p.id} className="glass p-5 rounded-2xl border border-white/10 flex items-center justify-between group hover:bg-white/5 transition-all">
@@ -123,23 +123,23 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-6">
                 <div className="text-right">
                   <span className="text-lg font-bold text-white block">Rp {p.price.toLocaleString()}</span>
                   <span className="text-[10px] text-white/30 uppercase tracking-tighter">Current Price</span>
                 </div>
-                
+
                 <div className="flex items-center gap-2 border-l border-white/10 pl-6">
-                  <button 
+                  <button
                     onClick={() => handleEdit(p)}
                     className="p-2 text-white/20 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-all"
                     title="Edit Product"
                   >
                     <Edit2 size={18} />
                   </button>
-                  <button 
-                    onClick={() => handleDelete(p.id)} 
+                  <button
+                    onClick={() => handleDelete(p.id)}
                     className="p-2 text-white/20 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
                     title="Delete Product"
                   >
@@ -149,7 +149,7 @@ export default function Dashboard() {
               </div>
             </div>
           ))}
-          
+
           {products.length === 0 && (
             <div className="text-center py-20 glass rounded-3xl border border-white/5">
               <p className="text-white/40">No products found. Start by adding one!</p>
@@ -159,10 +159,10 @@ export default function Dashboard() {
       </div>
 
       {/* Modal Form */}
-      <ProductForm 
-        isOpen={isFormOpen} 
-        onClose={handleCloseForm} 
-        product={editingProduct} 
+      <ProductForm
+        isOpen={isFormOpen}
+        onClose={handleCloseForm}
+        product={editingProduct}
         types={types}
       />
     </div>
