@@ -50,25 +50,24 @@ jobs:
         run: |
           cd ~/GSPE-Deployment
           
-          # Paksa git untuk mengabaikan perubahan lokal jika ada
+          # 1. Konfigurasi token DULU agar punya izin akses
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          
+          # 2. Paksa sinkronisasi dengan GitHub
           git fetch origin main
           git reset --hard origin/main
           
-          # Konfigurasi token untuk pull
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git pull origin main
-          
-          # Login ke registry
+          # 3. Login ke registry
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # Refresh container
+          # 4. Update container
           docker compose pull
           docker compose up -d
           
-          # Beri waktu 10 detik agar database siap
-          echo "Waiting for database to be ready..."
+          # 5. Tunggu database siap
+          echo "Waiting for database..."
           sleep 10
           
-          # Sinkronisasi Database
+          # 6. Database Update
           docker exec gspe-app npx prisma db push --accept-data-loss
           docker exec gspe-app npx prisma db seed
