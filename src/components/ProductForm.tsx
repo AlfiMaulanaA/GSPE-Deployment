@@ -1,17 +1,18 @@
 'use client'
 
 import React, { useState } from 'react'
-import { X, Save, Box, DollarSign, List, Image as ImageIcon } from 'lucide-react'
+import { X, Save, Box, DollarSign, List } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { createProduct, updateProduct } from '@/app/actions/product'
 
 interface ProductFormProps {
   product?: any
+  types: any[] // Menambahkan daftar tipe produk dari database
   isOpen: boolean
   onClose: () => void
 }
 
-export default function ProductForm({ product, isOpen, onClose }: ProductFormProps) {
+export default function ProductForm({ product, types, isOpen, onClose }: ProductFormProps) {
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -20,14 +21,19 @@ export default function ProductForm({ product, isOpen, onClose }: ProductFormPro
     
     const formData = new FormData(event.currentTarget)
     
-    if (product) {
-      await updateProduct(product.id, formData)
-    } else {
-      await createProduct(formData)
+    try {
+      if (product) {
+        await updateProduct(product.id, formData)
+      } else {
+        await createProduct(formData)
+      }
+      onClose()
+    } catch (error) {
+      console.error("Failed to save product:", error)
+      alert("Error saving product. Please check console.")
+    } finally {
+      setLoading(false)
     }
-    
-    setLoading(false)
-    onClose()
   }
 
   return (
@@ -62,7 +68,6 @@ export default function ProductForm({ product, isOpen, onClose }: ProductFormPro
             
             <form onSubmit={handleSubmit} className="p-8">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Basic Info */}
                 <div className="space-y-4 md:col-span-2">
                   <div className="space-y-1">
                     <label className="text-xs font-bold uppercase tracking-widest text-white/40">Product Name</label>
@@ -71,7 +76,7 @@ export default function ProductForm({ product, isOpen, onClose }: ProductFormPro
                       <input 
                         name="name" 
                         defaultValue={product?.name}
-                        placeholder="e.g. Premium Mechanical Keyboard" 
+                        placeholder="e.g. Nexabrick CM4 Gateway" 
                         required 
                         className="input-field pl-12 text-white"
                       />
@@ -83,24 +88,22 @@ export default function ProductForm({ product, isOpen, onClose }: ProductFormPro
                     <textarea 
                       name="description" 
                       defaultValue={product?.description}
-                      placeholder="Describe your product in detail..." 
+                      placeholder="Describe your product..." 
                       rows={3}
                       className="input-field text-white"
                     />
                   </div>
                 </div>
 
-                {/* Pricing & Stock */}
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase tracking-widest text-white/40">Price (USD)</label>
+                  <label className="text-xs font-bold uppercase tracking-widest text-white/40">Price (IDR)</label>
                   <div className="relative">
                     <DollarSign className="absolute left-4 top-3.5 text-white/20" size={18} />
                     <input 
                       name="price" 
                       type="number" 
-                      step="0.01"
                       defaultValue={product?.price}
-                      placeholder="0.00" 
+                      placeholder="0" 
                       required 
                       className="input-field pl-12 text-white"
                     />
@@ -122,30 +125,24 @@ export default function ProductForm({ product, isOpen, onClose }: ProductFormPro
                   </div>
                 </div>
 
-                {/* Metadata */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase tracking-widest text-white/40">Category</label>
+                {/* Dropdown Tipe Produk Dinamis */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-white/40">Product Type</label>
                   <div className="relative">
                     <List className="absolute left-4 top-3.5 text-white/20" size={18} />
-                    <input 
-                      name="category" 
-                      defaultValue={product?.category}
-                      placeholder="e.g. Electronics" 
-                      className="input-field pl-12 text-white"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase tracking-widest text-white/40">Image URL</label>
-                  <div className="relative">
-                    <ImageIcon className="absolute left-4 top-3.5 text-white/20" size={18} />
-                    <input 
-                      name="image" 
-                      defaultValue={product?.image}
-                      placeholder="https://images.unsplash.com/..." 
-                      className="input-field pl-12 text-white"
-                    />
+                    <select 
+                      name="typeId" 
+                      defaultValue={product?.typeId}
+                      required
+                      className="input-field pl-12 text-white appearance-none"
+                    >
+                      <option value="" className="bg-slate-900">Select Type...</option>
+                      {types.map((t) => (
+                        <option key={t.id} value={t.id} className="bg-slate-900">
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>

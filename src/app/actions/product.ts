@@ -23,7 +23,7 @@ export async function createProduct(formData: FormData) {
   const stock = parseInt(formData.get("stock") as string)
   const typeId = formData.get("typeId") as string
 
-  await prisma.product.create({
+  const product = await prisma.product.create({
     data: {
       name,
       description,
@@ -34,6 +34,29 @@ export async function createProduct(formData: FormData) {
   })
 
   revalidatePath("/")
+  return product
+}
+
+export async function updateProduct(id: string, formData: FormData) {
+  const name = formData.get("name") as string
+  const description = formData.get("description") as string
+  const price = parseFloat(formData.get("price") as string)
+  const stock = parseInt(formData.get("stock") as string)
+  const typeId = formData.get("typeId") as string
+
+  const product = await prisma.product.update({
+    where: { id },
+    data: {
+      name,
+      description,
+      price,
+      stock,
+      typeId,
+    },
+  })
+
+  revalidatePath("/")
+  return product
 }
 
 export async function deleteProduct(id: string) {
