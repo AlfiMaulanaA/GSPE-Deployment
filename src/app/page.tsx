@@ -1,15 +1,11 @@
 import Navbar from '@/components/Navbar'
 import Dashboard from '@/components/Dashboard'
-import { getProducts } from './actions/product'
 
 export default async function Home() {
-  const result = await getProducts()
-  const products = result.success ? result.data : []
-
   return (
     <div className="min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200">
       <Navbar />
-      <Dashboard initialProducts={products || []} />
+      <Dashboard />
       
       {/* Background Decorative Elements */}
       <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
