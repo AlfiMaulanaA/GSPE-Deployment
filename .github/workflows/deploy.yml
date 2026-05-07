@@ -44,21 +44,24 @@ jobs:
 
   deploy:
     needs: build-and-push
-    runs-on: self-hosted  # Menggunakan Raspi Anda sendiri
+    runs-on: self-hosted
     steps:
       - name: Execution on Raspi
         run: |
           cd ~/GSPE-Deployment
           
-          # Login ke registry agar bisa pull image private
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          # Konfigurasi agar git pull tidak minta password (menggunakan GITHUB_TOKEN)
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
           
           # Ambil update docker-compose.yml terbaru
           git pull
           
-          # Pull image terbaru dan jalankan
-          docker-compose pull
-          docker-compose up -d
+          # Login ke registry agar bisa pull image private
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # Pull image terbaru dan jalankan (menggunakan 'docker compose' tanpa tanda hubung)
+          docker compose pull
+          docker compose up -d
           
           # Sinkronisasi Database
           docker exec gspe-app npx prisma db push
