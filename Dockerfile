@@ -12,11 +12,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 
-# Generate Prisma Client
 RUN npx prisma generate
 RUN npm run build
 
@@ -30,7 +28,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+# Salin folder public
 COPY --from=builder /app/public ./public
+
+# PENTING: Salin folder prisma dan konfigurasinya agar bisa db push/seed di produksi
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+
+# Salin hasil build standalone
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 

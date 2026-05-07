@@ -68,6 +68,6 @@ jobs:
           echo "Waiting for database..."
           sleep 10
           
-          # 6. Database Update
-          docker exec gspe-app npx prisma db push --accept-data-loss
+          # 6. Database Update (Explicit Schema Path)
+          docker exec gspe-app npx prisma db push --accept-data-loss --schema ./prisma/schema.prisma
           docker exec gspe-app npx prisma db seed
