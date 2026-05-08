@@ -75,7 +75,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">GSPE Product Dashboard</h1>
           <p className="text-white/60">Manage your industrial inventory with style.</p>
-          <p className="text-white/60">by Alfi Maulana DevOps Engineer</p>
+          <p className="text-white/60">By Alfi Maulana DevOps Engineer</p>
         </div>
         <button
           onClick={handleAddNew}

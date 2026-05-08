@@ -34,7 +34,6 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          # PERBAIKAN: Menggunakan format lowercase secara eksplisit
           tags: ghcr.io/alfimaulanaa/gspe-deployment:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -47,6 +46,8 @@ jobs:
       - name: Execution on AWS Lightsail
         run: |
           mkdir -p ~/GSPE-Deployment && cd ~/GSPE-Deployment
+          
+          # 1. Pull Metode (Sync Configuration)
           if [ ! -d ".git" ]; then
             git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git .
           else
@@ -54,12 +55,22 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
           fi
+
+          # 2. Secret Injection (Otomatisasi .env)
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" > .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
+          echo "DATABASE_URL=\"${{ secrets.DATABASE_URL }}\"" >> .env
+          
+          # 3. Docker Ops
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose pull
           docker compose up -d --remove-orphans
           docker image prune -f
+          
+          # 4. Database Lifecycle
           echo "Waiting for DB..."
-          sleep 15
+          sleep 20
           docker exec gspe-app npx prisma db push --accept-data-loss
           docker exec gspe-app npx prisma db seed
 
@@ -71,6 +82,8 @@ jobs:
       - name: Execution on Raspberry Pi
         run: |
           mkdir -p ~/GSPE-Deployment && cd ~/GSPE-Deployment
+          
+          # 1. Pull Metode (Sync Configuration)
           if [ ! -d ".git" ]; then
             git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git .
           else
@@ -78,11 +91,21 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
           fi
+
+          # 2. Secret Injection (Otomatisasi .env)
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" > .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
+          echo "DATABASE_URL=\"${{ secrets.DATABASE_URL }}\"" >> .env
+          
+          # 3. Docker Ops
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose pull
           docker compose up -d --remove-orphans
           docker image prune -f
+          
+          # 4. Database Lifecycle
           echo "Waiting for DB..."
-          sleep 15
+          sleep 20
           docker exec gspe-app npx prisma db push --accept-data-loss
           docker exec gspe-app npx prisma db seed
