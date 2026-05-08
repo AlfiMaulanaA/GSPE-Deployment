@@ -32,10 +32,10 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          # SANGAT PENTING: Membangun image untuk kedua arsitektur
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/gspe-deployment:latest
+          # PERBAIKAN: Menggunakan format lowercase secara eksplisit
+          tags: ghcr.io/alfimaulanaa/gspe-deployment:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
