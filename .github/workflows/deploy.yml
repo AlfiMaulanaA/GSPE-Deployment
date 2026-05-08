@@ -1,4 +1,4 @@
-name: CI/CD Pipeline (Registry-First)
+name: CI/CD Pipeline (Dual Deployment - AWS & Raspi)
 
 on:
   push:
@@ -17,8 +17,6 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-        with:
-          platforms: 'arm64'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -34,39 +32,57 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          # SANGAT PENTING: Membangun image untuk kedua arsitektur
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/alfimaulanaa/gspe-deployment:latest
+          tags: ghcr.io/${{ github.repository_owner }}/gspe-deployment:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy
 
-  deploy:
+  # JOB 1: Deploy ke AWS Lightsail (X64)
+  deploy-aws:
     needs: build-and-push
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, X64]
     steps:
-      - name: Execution on Raspi
+      - name: Execution on AWS Lightsail
         run: |
-          cd ~/GSPE-Deployment
-          
-          # 1. Konfigurasi token untuk sinkronisasi folder (jika ada perubahan docker-compose)
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git fetch origin main
-          git reset --hard origin/main
-          
-          # 2. Login ke registry
+          mkdir -p ~/GSPE-Deployment && cd ~/GSPE-Deployment
+          if [ ! -d ".git" ]; then
+            git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git .
+          else
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            git fetch origin main
+            git reset --hard origin/main
+          fi
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          
-          # 3. Update container
           docker compose pull
-          docker compose up -d
-          
-          # 4. Tunggu database siap
-          echo "Waiting for database..."
-          sleep 10
-          
-          # 5. Database Update (Menggunakan prisma global yang sudah terinstal di image)
-          # Kita gunakan perintah 'prisma' langsung tanpa npx agar lebih cepat dan stabil
-          docker exec gspe-app prisma db push --accept-data-loss
-          docker exec gspe-app prisma db seed
+          docker compose up -d --remove-orphans
+          docker image prune -f
+          echo "Waiting for DB..."
+          sleep 15
+          docker exec gspe-app npx prisma db push --accept-data-loss
+          docker exec gspe-app npx prisma db seed
+
+  # JOB 2: Deploy ke Nexabrick / Raspberry Pi (ARM64)
+  deploy-raspi:
+    needs: build-and-push
+    runs-on: [self-hosted, linux, arm64]
+    steps:
+      - name: Execution on Raspberry Pi
+        run: |
+          mkdir -p ~/GSPE-Deployment && cd ~/GSPE-Deployment
+          if [ ! -d ".git" ]; then
+            git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git .
+          else
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            git fetch origin main
+            git reset --hard origin/main
+          fi
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker compose pull
+          docker compose up -d --remove-orphans
+          docker image prune -f
+          echo "Waiting for DB..."
+          sleep 15
+          docker exec gspe-app npx prisma db push --accept-data-loss
+          docker exec gspe-app npx prisma db seed
