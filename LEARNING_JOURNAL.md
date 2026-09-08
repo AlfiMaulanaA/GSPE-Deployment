@@ -17,3 +17,5 @@
 - **Level 4**: Berhasil diselesaikan!
 
 - **Fitur Ceri**: Perbaikan Kritis dari Member (Target Cherry-Pick)
+
+- Perbaikan validasi tombol submit selesai (Issue #3)
