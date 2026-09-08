@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Cek pembaruan paket npm di folder dev1-lead setiap minggu
+  - package-ecosystem: "npm"
+    directory: "/dev1-lead"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Cek pembaruan paket npm di folder dev2-member setiap minggu
+  - package-ecosystem: "npm"
+    directory: "/dev2-member"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
