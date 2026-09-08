@@ -15,3 +15,5 @@
 - **Level 3**: Berhasil diselesaikan!
 
 - **Level 4**: Berhasil diselesaikan!
+
+- **Fitur Ceri**: Perbaikan Kritis dari Member (Target Cherry-Pick)
