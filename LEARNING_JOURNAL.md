@@ -7,3 +7,5 @@
 ## Alamat Tim
 - **User 1 (Lead)**: [Jakarta]
 - **User 2 (Member)**: [Bandung]
+
+- **Level 2**: Berhasil diselesaikan!
