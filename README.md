@@ -2,7 +2,7 @@
 
 A comprehensive Next.js application with a premium UI for managing products.
 
-## Tech Stacks
+## Tech Stacks Versi Lead
 - **Framework**: Next.js 14+ (App Router)
 - **Styling**: Tailwind CSS
 - **ORM**: Prisma
