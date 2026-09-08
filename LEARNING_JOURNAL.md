@@ -8,6 +8,8 @@
 - **User 1 (Lead)**: [Jakarta]
 - **User 2 (Member)**: [Bandung]
 
+- **Status Rebase**: Versi Lead Utama di Main Server
+
 - **Level 2**: Berhasil diselesaikan!
 
 - **Level 3**: Berhasil diselesaikan!
