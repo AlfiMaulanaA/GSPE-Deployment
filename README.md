@@ -2,7 +2,7 @@
 
 A comprehensive Next.js application with a premium UI for managing products.
 
-## Tech Stacks (Official DevOps Enterprise Release 2026)
+## Tech Stacks (Custom Member Feature Branch B1)
 - **Framework**: Next.js 14+ (App Router)
 - **Styling**: Tailwind CSS
 - **ORM**: Prisma
@@ -12,7 +12,7 @@ A comprehensive Next.js application with a premium UI for managing products.
 
 ## Features
 - ✨ Premium Glassmorphic Design
-- 🚀 Server Actions for CRUD operations with Redis Caching
+- 🚀 Server Actions for CRUD operations with Local Storage
 - 🔍 Real-time client-side search and filtering
 - 📱 Responsive layout for all devices
 - 🌑 Dark-mode optimized aesthetic

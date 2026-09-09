@@ -7,7 +7,7 @@
 Bayangkan Anda ingin mengirim kue ke rumah teman (Raspberry Pi) di kota lain.
 
 *   **Dulu (Manual):** Anda harus membuat kue sendiri, membungkusnya, pergi ke terminal, naik bus, dan mengantarkannya sendiri. Jika ada kesalahan (lupa gula), Anda harus pulang dan mengulang semuanya dari awal. Melelahkan, bukan?
-*   **Sekarang (CI/CD)**: Pengiriman otomatis via Kubernetes Cluster & AWS Lightsail.
+*   **Sekarang (CI/CD)**: Pengiriman otomatis via Docker Standalone & Raspberry Pi.
 
 ---
 

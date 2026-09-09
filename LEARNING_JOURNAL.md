@@ -8,15 +8,15 @@
 - **User 1 (Lead)**: [Jakarta]
 - **User 2 (Member)**: [Bandung]
 
-- **Status Server DevOps**: Main Server Updated to v2.0.0 by DevOps (Production Stable)
+- **Status Server Member**: Member Feature Branch v1.5.0 Active (Local Testing)
 
-- **Level 2**: Versi 2.0 Refactored by DevOps
+- **Level 2**: Modified by Member for Feature B1
 
 - **Level 3**: Berhasil diselesaikan!
 
 - **Level 4**: Berhasil diselesaikan!
 
-- **Fitur Ceri**: Perbaikan Kritis dari Member (Target Cherry-Pick)
+- **Status Deployment**: Local Docker Active on Port 3000
 
 - Perbaikan validasi tombol submit selesai (Issue #3)
 - **Fitur A1 Member**: Pengisian fitur baru
