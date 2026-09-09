@@ -19,3 +19,4 @@
 - **Fitur Ceri**: Perbaikan Kritis dari Member (Target Cherry-Pick)
 
 - Perbaikan validasi tombol submit selesai (Issue #3)
+- **Fitur A1 Member**: Pengisian fitur baru
