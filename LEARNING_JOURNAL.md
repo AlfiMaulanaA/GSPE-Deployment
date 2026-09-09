@@ -18,5 +18,5 @@
 
 - **Fitur Ceri**: Perbaikan Kritis dari Member (Target Cherry-Pick)
 
-- **Status Deployment**: Cluster AWS Active on Port 4000
-
+- Perbaikan validasi tombol submit selesai (Issue #3)
+- **Fitur A1 Member**: Pengisian fitur baru
