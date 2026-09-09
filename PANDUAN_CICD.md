@@ -7,7 +7,7 @@
 Bayangkan Anda ingin mengirim kue ke rumah teman (Raspberry Pi) di kota lain.
 
 *   **Dulu (Manual):** Anda harus membuat kue sendiri, membungkusnya, pergi ke terminal, naik bus, dan mengantarkannya sendiri. Jika ada kesalahan (lupa gula), Anda harus pulang dan mengulang semuanya dari awal. Melelahkan, bukan?
-*   **Sekarang (CI/CD):** Anda cukup menulis resep di sebuah buku (GitHub). Begitu Anda selesai menulis, sebuah **Robot Ajaib** akan otomatis membacanya, membuatkan kuenya di pabrik, dan mengirimkannya langsung ke rumah teman Anda menggunakan drone. Anda cukup duduk manis di rumah.
+*   **Sekarang (CI/CD)**: Pengiriman otomatis via Kubernetes Cluster & AWS Lightsail.
 
 ---
 

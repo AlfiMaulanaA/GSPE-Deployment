@@ -8,9 +8,9 @@
 - **User 1 (Lead)**: [Jakarta]
 - **User 2 (Member)**: [Bandung]
 
-- **Status Server DevOps**: Main Server Updated to v2.0.0 by DevOps
+- **Status Server DevOps**: Main Server Updated to v2.0.0 by DevOps (Production Stable)
 
-- **Level 2**: Berhasil diselesaikan!
+- **Level 2**: Versi 2.0 Refactored by DevOps
 
 - **Level 3**: Berhasil diselesaikan!
 
@@ -18,4 +18,5 @@
 
 - **Fitur Ceri**: Perbaikan Kritis dari Member (Target Cherry-Pick)
 
-- Perbaikan validasi tombol submit selesai (Issue #3)
+- **Status Deployment**: Cluster AWS Active on Port 4000
+
