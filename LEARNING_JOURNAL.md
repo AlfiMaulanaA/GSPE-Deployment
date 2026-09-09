@@ -8,7 +8,7 @@
 - **User 1 (Lead)**: [Jakarta]
 - **User 2 (Member)**: [Bandung]
 
-- **Status Rebase**: Versi Lead Utama di Main Server
+- **Status Server DevOps**: Main Server Updated to v2.0.0 by DevOps
 
 - **Level 2**: Berhasil diselesaikan!
 
