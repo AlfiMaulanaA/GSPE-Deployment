@@ -16,7 +16,7 @@
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",
     "@types/pg": "^8.20.0",
-    "framer-motion": "^12.38.0",
+    "framer-motion": "^14.0.0",
     "lucide-react": "^1.14.0",
     "next": "16.4.0",
     "pg": "^8.20.0",
