@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       target_url:
-        description: Public URL tested by k6
+        description: URL tested by k6 from the deployment runner
         required: true
         type: string
       profile:
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: Public URL tested by k6
+        description: URL tested by k6 from the deployment runner
         required: true
         type: string
       profile:
@@ -30,7 +30,7 @@ on:
 jobs:
   k6:
     name: k6 ${{ inputs.profile }} test
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, X64, deployment]
     timeout-minutes: 15
     permissions:
       contents: read

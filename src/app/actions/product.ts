@@ -1,6 +1,7 @@
 "use server"
 
 import prisma from "@/lib/prisma"
+import { parseProductForm, parseProductId } from "@/lib/product-validation"
 import { revalidatePath } from "next/cache"
 
 export async function getProductTypes() {
@@ -17,54 +18,38 @@ export async function getProducts() {
 }
 
 export async function createProduct(formData: FormData) {
-  const name = formData.get("name") as string
-  const description = formData.get("description") as string
-  const price = parseFloat(formData.get("price") as string)
-  const stock = parseInt(formData.get("stock") as string)
-  const typeId = formData.get("typeId") as string
+  const data = parseProductForm(formData)
 
-  const product = await prisma.product.create({
-    data: {
-      name,
-      description,
-      price,
-      stock,
-      typeId,
-    },
+  await prisma.product.create({
+    data,
   })
 
   revalidatePath("/")
-  return product
+  return { success: true }
 }
 
 export async function updateProduct(id: string, formData: FormData) {
-  const name = formData.get("name") as string
-  const description = formData.get("description") as string
-  const price = parseFloat(formData.get("price") as string)
-  const stock = parseInt(formData.get("stock") as string)
-  const typeId = formData.get("typeId") as string
+  const productId = parseProductId(id)
+  const data = parseProductForm(formData)
 
-  const product = await prisma.product.update({
-    where: { id },
-    data: {
-      name,
-      description,
-      price,
-      stock,
-      typeId,
-    },
+  await prisma.product.update({
+    where: { id: productId },
+    data,
   })
 
   revalidatePath("/")
-  return product
+  return { success: true }
 }
 
 export async function deleteProduct(id: string) {
+  const productId = parseProductId(id)
+
   await prisma.product.delete({
-    where: { id },
+    where: { id: productId },
   })
 
   revalidatePath("/")
+  return { success: true }
 }
 
 export async function getStats() {

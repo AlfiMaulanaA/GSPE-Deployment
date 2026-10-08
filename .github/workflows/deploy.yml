@@ -14,15 +14,29 @@ env:
   IMAGE_NAME: ghcr.io/alfimaulanaa/gspe-deployment
 
 jobs:
-  quality:
-    name: Lint, type-check, and build
+  verify:
+    name: Test application and database
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
-      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gspe_test?schema=public
       NEXT_TELEMETRY_DISABLED: 1
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gspe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d gspe_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -45,12 +59,66 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
 
+      - name: Unit tests
+        run: npm test
+
+      - name: Audit critical production vulnerabilities
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Initialize test database
+        run: |
+          npx prisma db push
+          npm run seed
+
       - name: Build application
         run: npm run build
 
+      - name: Functional smoke test
+        run: |
+          set -euo pipefail
+          node .next/standalone/server.js >"$RUNNER_TEMP/gspe-app.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/ \
+              --output "$RUNNER_TEMP/homepage.html"; then
+              grep --quiet 'NEXASTORE' "$RUNNER_TEMP/homepage.html"
+              exit
+            fi
+            sleep 2
+          done
+
+          cat "$RUNNER_TEMP/gspe-app.log"
+          exit 1
+
+  codeql:
+    name: CodeQL security analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+      actions: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:javascript-typescript
+
   build-and-push:
     name: Build and publish container
-    needs: quality
+    needs: [verify, codeql]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -60,9 +128,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -78,7 +143,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
@@ -86,128 +151,50 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy-aws:
-    name: Deploy to AWS Lightsail
+  deploy-server:
+    name: Deploy to containment server
     needs: build-and-push
-    runs-on: [self-hosted, linux, X64]
+    runs-on: [self-hosted, linux, X64, deployment]
     timeout-minutes: 15
     permissions:
       contents: read
       packages: read
     env:
-      DEPLOY_BRANCH: ${{ github.ref_name }}
+      APP_IMAGE: ghcr.io/alfimaulanaa/gspe-deployment:${{ github.sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      RUN_DATABASE_SEED: ${{ vars.RUN_DATABASE_SEED }}
     steps:
-      - name: Deploy on AWS Lightsail
+      - name: Checkout deployment files
+        uses: actions/checkout@v4
+
+      - name: Deploy tested image
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/GSPE-Deployment"
-          cd "$HOME/GSPE-Deployment"
-
-          if [ ! -d .git ]; then
-            git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" .
-          else
-            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
-            git fetch origin "$DEPLOY_BRANCH"
-            git reset --hard "origin/$DEPLOY_BRANCH"
-          fi
-
-          printf 'POSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=%s\nDATABASE_URL=%s\n' \
-            "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_DB" "$DATABASE_URL" > .env
+          deploy_dir="$HOME/GSPE-Deployment"
+          test -f "$deploy_dir/.env"
+          install -m 0644 docker-compose.yml "$deploy_dir/docker-compose.yml"
+          cd "$deploy_dir"
 
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker compose pull
+          export APP_IMAGE
+          docker compose pull app
           docker compose up -d --remove-orphans
-
           docker exec gspe-app npx prisma db push
-          if [ "$RUN_DATABASE_SEED" = "true" ]; then
-            docker exec gspe-app npx prisma db seed
-          fi
 
-          for attempt in $(seq 1 12); do
-            if curl --fail --silent --show-error http://localhost:3000/ >/dev/null; then
-              break
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/ >/dev/null; then
+              docker compose ps
+              exit 0
             fi
-            if [ "$attempt" -eq 12 ]; then
-              docker compose logs app
-              exit 1
-            fi
-            sleep 5
+            sleep 2
           done
 
-  deploy-raspi:
-    name: Deploy to Raspberry Pi
-    needs: build-and-push
-    runs-on: [self-hosted, linux, arm64]
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: read
-    env:
-      DEPLOY_BRANCH: ${{ github.ref_name }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      RUN_DATABASE_SEED: ${{ vars.RUN_DATABASE_SEED }}
-    steps:
-      - name: Deploy on Raspberry Pi
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/GSPE-Deployment"
-          cd "$HOME/GSPE-Deployment"
+          docker compose logs app
+          exit 1
 
-          if [ ! -d .git ]; then
-            git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" .
-          else
-            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
-            git fetch origin "$DEPLOY_BRANCH"
-            git reset --hard "origin/$DEPLOY_BRANCH"
-          fi
-
-          printf 'POSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=%s\nDATABASE_URL=%s\n' \
-            "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_DB" "$DATABASE_URL" > .env
-
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker compose pull
-          docker compose up -d --remove-orphans
-
-          docker exec gspe-app npx prisma db push
-          if [ "$RUN_DATABASE_SEED" = "true" ]; then
-            docker exec gspe-app npx prisma db seed
-          fi
-
-          for attempt in $(seq 1 12); do
-            if curl --fail --silent --show-error http://localhost:3000/ >/dev/null; then
-              break
-            fi
-            if [ "$attempt" -eq 12 ]; then
-              docker compose logs app
-              exit 1
-            fi
-            sleep 5
-          done
-
-  smoke-test-aws:
-    name: Smoke test AWS
-    needs: deploy-aws
-    if: vars.AWS_APP_URL != ''
+  smoke-test-server:
+    name: Post-deployment smoke test
+    needs: deploy-server
     uses: ./.github/workflows/performance-test.yml
     with:
-      target_url: ${{ vars.AWS_APP_URL }}
-      profile: smoke
-
-  smoke-test-raspi:
-    name: Smoke test Raspberry Pi
-    needs: deploy-raspi
-    if: vars.RASPI_APP_URL != ''
-    uses: ./.github/workflows/performance-test.yml
-    with:
-      target_url: ${{ vars.RASPI_APP_URL }}
+      target_url: http://127.0.0.1:3000
       profile: smoke

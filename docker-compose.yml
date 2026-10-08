@@ -1,6 +1,6 @@
 services:
   app:
-    image: ghcr.io/alfimaulanaa/gspe-deployment:latest
+    image: ${APP_IMAGE:-ghcr.io/alfimaulanaa/gspe-deployment:latest}
     container_name: gspe-app
     restart: always
     ports:

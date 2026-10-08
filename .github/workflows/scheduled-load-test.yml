@@ -7,18 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  aws:
-    name: AWS production load test
-    if: vars.AWS_APP_URL != ''
+  server:
+    name: Containment server load test
     uses: ./.github/workflows/performance-test.yml
     with:
-      target_url: ${{ vars.AWS_APP_URL }}
-      profile: load
-
-  raspi:
-    name: Raspberry Pi production load test
-    if: vars.RASPI_APP_URL != ''
-    uses: ./.github/workflows/performance-test.yml
-    with:
-      target_url: ${{ vars.RASPI_APP_URL }}
+      target_url: http://127.0.0.1:3000
       profile: load
