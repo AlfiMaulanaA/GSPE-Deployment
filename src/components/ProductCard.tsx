@@ -3,6 +3,7 @@
 import React from 'react'
 import { Edit2, Trash2, Tag, Box, DollarSign } from 'lucide-react'
 import { motion } from 'framer-motion'
+import Image from 'next/image'
 
 interface ProductProps {
   product: {
@@ -28,7 +29,14 @@ export default function ProductCard({ product, onEdit, onDelete }: ProductProps)
     >
       <div className="relative h-48 w-full bg-gradient-to-br from-indigo-500/10 to-purple-500/10 p-6 flex items-center justify-center">
         {product.image ? (
-          <img src={product.image} alt={product.name} className="h-full w-full object-cover transition-transform group-hover:scale-110" />
+          <Image
+            src={product.image}
+            alt={product.name}
+            fill
+            sizes="(min-width: 768px) 50vw, 100vw"
+            unoptimized
+            className="object-cover transition-transform group-hover:scale-110"
+          />
         ) : (
           <Box size={64} className="text-white/20 group-hover:text-indigo-400/40 transition-colors" />
         )}
