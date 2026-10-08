@@ -1,16 +1,62 @@
-name: CI/CD Pipeline (Dual Deployment - AWS & Raspi)
+name: CI/CD Pipeline
 
 on:
+  pull_request:
+    branches: [main, master]
   push:
-    branches: [ main, master ]
+    branches: [main, master]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/alfimaulanaa/gspe-deployment
 
 jobs:
-  build-and-push:
+  quality:
+    name: Lint, type-check, and build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build application
+        run: npm run build
+
+  build-and-push:
+    name: Build and publish container
+    needs: quality
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -21,91 +67,147 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - name: Build and push image
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/alfimaulanaa/gspe-deployment:latest
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # JOB 1: Deploy ke AWS Lightsail (X64)
   deploy-aws:
+    name: Deploy to AWS Lightsail
     needs: build-and-push
     runs-on: [self-hosted, linux, X64]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_BRANCH: ${{ github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      RUN_DATABASE_SEED: ${{ vars.RUN_DATABASE_SEED }}
     steps:
-      - name: Execution on AWS Lightsail
+      - name: Deploy on AWS Lightsail
         run: |
-          mkdir -p ~/GSPE-Deployment && cd ~/GSPE-Deployment
-          
-          # 1. Pull Metode (Sync Configuration)
-          if [ ! -d ".git" ]; then
-            git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git .
+          set -euo pipefail
+          mkdir -p "$HOME/GSPE-Deployment"
+          cd "$HOME/GSPE-Deployment"
+
+          if [ ! -d .git ]; then
+            git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" .
           else
-            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-            git fetch origin main
-            git reset --hard origin/main
+            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+            git fetch origin "$DEPLOY_BRANCH"
+            git reset --hard "origin/$DEPLOY_BRANCH"
           fi
 
-          # 2. Secret Injection (Otomatisasi .env)
-          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" > .env
-          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
-          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
-          echo "DATABASE_URL=\"${{ secrets.DATABASE_URL }}\"" >> .env
-          
-          # 3. Docker Ops
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          printf 'POSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=%s\nDATABASE_URL=%s\n' \
+            "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_DB" "$DATABASE_URL" > .env
+
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker compose pull
           docker compose up -d --remove-orphans
-          docker image prune -f
-          
-          # 4. Database Lifecycle
-          echo "Waiting for DB..."
-          sleep 20
-          docker exec gspe-app npx prisma db push --accept-data-loss
-          docker exec gspe-app npx prisma db seed
 
-  # JOB 2: Deploy ke Nexabrick / Raspberry Pi (ARM64)
+          docker exec gspe-app npx prisma db push
+          if [ "$RUN_DATABASE_SEED" = "true" ]; then
+            docker exec gspe-app npx prisma db seed
+          fi
+
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error http://localhost:3000/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              docker compose logs app
+              exit 1
+            fi
+            sleep 5
+          done
+
   deploy-raspi:
+    name: Deploy to Raspberry Pi
     needs: build-and-push
     runs-on: [self-hosted, linux, arm64]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_BRANCH: ${{ github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      RUN_DATABASE_SEED: ${{ vars.RUN_DATABASE_SEED }}
     steps:
-      - name: Execution on Raspberry Pi
+      - name: Deploy on Raspberry Pi
         run: |
-          mkdir -p ~/GSPE-Deployment && cd ~/GSPE-Deployment
-          
-          # 1. Pull Metode (Sync Configuration)
-          if [ ! -d ".git" ]; then
-            git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git .
+          set -euo pipefail
+          mkdir -p "$HOME/GSPE-Deployment"
+          cd "$HOME/GSPE-Deployment"
+
+          if [ ! -d .git ]; then
+            git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" .
           else
-            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-            git fetch origin main
-            git reset --hard origin/main
+            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+            git fetch origin "$DEPLOY_BRANCH"
+            git reset --hard "origin/$DEPLOY_BRANCH"
           fi
 
-          # 2. Secret Injection (Otomatisasi .env)
-          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" > .env
-          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
-          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
-          echo "DATABASE_URL=\"${{ secrets.DATABASE_URL }}\"" >> .env
-          
-          # 3. Docker Ops
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          printf 'POSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=%s\nDATABASE_URL=%s\n' \
+            "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_DB" "$DATABASE_URL" > .env
+
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker compose pull
           docker compose up -d --remove-orphans
-          docker image prune -f
-          
-          # 4. Database Lifecycle
-          echo "Waiting for DB..."
-          sleep 20
-          docker exec gspe-app npx prisma db push --accept-data-loss
-          docker exec gspe-app npx prisma db seed
+
+          docker exec gspe-app npx prisma db push
+          if [ "$RUN_DATABASE_SEED" = "true" ]; then
+            docker exec gspe-app npx prisma db seed
+          fi
+
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error http://localhost:3000/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              docker compose logs app
+              exit 1
+            fi
+            sleep 5
+          done
+
+  smoke-test-aws:
+    name: Smoke test AWS
+    needs: deploy-aws
+    if: vars.AWS_APP_URL != ''
+    uses: ./.github/workflows/performance-test.yml
+    with:
+      target_url: ${{ vars.AWS_APP_URL }}
+      profile: smoke
+
+  smoke-test-raspi:
+    name: Smoke test Raspberry Pi
+    needs: deploy-raspi
+    if: vars.RASPI_APP_URL != ''
+    uses: ./.github/workflows/performance-test.yml
+    with:
+      target_url: ${{ vars.RASPI_APP_URL }}
+      profile: smoke

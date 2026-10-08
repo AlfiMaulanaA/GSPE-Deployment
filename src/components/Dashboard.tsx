@@ -1,30 +1,31 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useState } from "react"
+import type { Prisma, ProductType } from "@prisma/client"
 import { deleteProduct, getProducts, getStats, getProductTypes } from "@/app/actions/product"
 import ProductForm from "./ProductForm"
 import { Plus, Edit2, Trash2 } from 'lucide-react'
 
-export default function Dashboard() {
-  const [products, setProducts] = useState<any[]>([])
-  const [types, setTypes] = useState<any[]>([])
-  const [stats, setStats] = useState<any>({
-    totalProducts: 0,
-    outOfStock: 0,
-    lowStock: 0,
-    totalValue: 0
-  })
-  const [loading, setLoading] = useState(true)
+type ProductWithType = Prisma.ProductGetPayload<{ include: { type: true } }>
+type ProductStats = Awaited<ReturnType<typeof getStats>>
+
+interface DashboardProps {
+  initialProducts: ProductWithType[]
+  initialTypes: ProductType[]
+  initialStats: ProductStats
+}
+
+export default function Dashboard({ initialProducts, initialTypes, initialStats }: DashboardProps) {
+  const [products, setProducts] = useState<ProductWithType[]>(initialProducts)
+  const [types, setTypes] = useState<ProductType[]>(initialTypes)
+  const [stats, setStats] = useState<ProductStats>(initialStats)
+  const [loading, setLoading] = useState(false)
 
   // State untuk Modal Form
   const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingProduct, setEditingProduct] = useState<any>(null)
+  const [editingProduct, setEditingProduct] = useState<ProductWithType | null>(null)
 
-  useEffect(() => {
-    refreshData()
-  }, [])
-
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     setLoading(true)
     const [productsData, statsData, typesData] = await Promise.all([
       getProducts(),
@@ -35,16 +36,16 @@ export default function Dashboard() {
     setStats(statsData)
     setTypes(typesData)
     setLoading(false)
-  }
+  }, [])
 
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this product?")) {
       await deleteProduct(id)
-      refreshData()
+      await refreshData()
     }
   }
 
-  const handleEdit = (product: any) => {
+  const handleEdit = (product: ProductWithType) => {
     setEditingProduct(product)
     setIsFormOpen(true)
   }
@@ -57,7 +58,7 @@ export default function Dashboard() {
   const handleCloseForm = () => {
     setIsFormOpen(false)
     setEditingProduct(null)
-    refreshData()
+    void refreshData()
   }
 
   if (loading) {

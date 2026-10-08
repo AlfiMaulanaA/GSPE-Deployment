@@ -1,11 +1,24 @@
 import Navbar from '@/components/Navbar'
 import Dashboard from '@/components/Dashboard'
+import { getProducts, getProductTypes, getStats } from '@/app/actions/product'
+
+export const dynamic = 'force-dynamic'
 
 export default async function Home() {
+  const [products, types, stats] = await Promise.all([
+    getProducts(),
+    getProductTypes(),
+    getStats(),
+  ])
+
   return (
     <div className="min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200">
       <Navbar />
-      <Dashboard />
+      <Dashboard
+        initialProducts={products}
+        initialTypes={types}
+        initialStats={stats}
+      />
       
       {/* Background Decorative Elements */}
       <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">

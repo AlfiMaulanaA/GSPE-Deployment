@@ -1,0 +1,50 @@
+name: Performance Test
+
+on:
+  workflow_call:
+    inputs:
+      target_url:
+        description: Public URL tested by k6
+        required: true
+        type: string
+      profile:
+        description: Test profile (smoke or load)
+        required: false
+        default: smoke
+        type: string
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: Public URL tested by k6
+        required: true
+        type: string
+      profile:
+        description: Test profile
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - load
+
+jobs:
+  k6:
+    name: k6 ${{ inputs.profile }} test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up k6
+        uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: 1.7.1
+
+      - name: Run performance test
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+          TEST_PROFILE: ${{ inputs.profile }}
+        run: k6 run loadtest/site.js

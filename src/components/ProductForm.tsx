@@ -4,10 +4,11 @@ import React, { useState } from 'react'
 import { X, Save, Box, DollarSign, List } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { createProduct, updateProduct } from '@/app/actions/product'
+import type { Product, ProductType } from '@prisma/client'
 
 interface ProductFormProps {
-  product?: any
-  types: any[] // Menambahkan daftar tipe produk dari database
+  product?: Product | null
+  types: ProductType[] // Menambahkan daftar tipe produk dari database
   isOpen: boolean
   onClose: () => void
 }
@@ -87,7 +88,7 @@ export default function ProductForm({ product, types, isOpen, onClose }: Product
                     <label className="text-xs font-bold uppercase tracking-widest text-white/40">Description</label>
                     <textarea 
                       name="description" 
-                      defaultValue={product?.description}
+                      defaultValue={product?.description ?? ''}
                       placeholder="Describe your product..." 
                       rows={3}
                       className="input-field text-white"

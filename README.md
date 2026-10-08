@@ -24,6 +24,7 @@ A comprehensive Next.js application with a premium UI for managing products.
    ```bash
    npm install
    ```
+   Node.js 22 or newer is recommended.
 3. **Set up your Database**:
    Create a `.env` file in the root directory and add your PostgreSQL connection string:
    ```env
@@ -51,13 +52,24 @@ This project is fully dockerized for production.
 
 ### CI/CD with GitHub Actions
 The project includes a pre-configured GitHub Actions pipeline (`.github/workflows/deploy.yml`):
-- **CI**: Runs on every push/PR to `main`. It performs linting, type checking, and build validation.
-- **CD**: Automatically deploys to your server via SSH when a push is made to the `main` branch.
+- **CI**: Runs on every push/PR to `main` or `master`. It performs linting, type checking, Prisma client generation, and build validation.
+- **Container**: Builds multi-architecture (`amd64` and `arm64`) images and publishes both `latest` and commit-SHA tags to GHCR.
+- **CD**: Deploys to the AWS and Raspberry Pi self-hosted runners after CI succeeds.
+- **Performance gate**: Runs a k6 smoke test after each deployment when the corresponding public URL is configured.
+- **Scheduled test**: Runs a larger k6 load test every Sunday at 12:12 WIB and can also be started manually.
 
 **Required GitHub Secrets:**
-- `DEPLOY_HOST`: Your server IP/Hostname.
-- `DEPLOY_USER`: SSH Username.
-- `DEPLOY_KEY`: Your private SSH key.
+- `POSTGRES_USER`: PostgreSQL username.
+- `POSTGRES_PASSWORD`: PostgreSQL password.
+- `POSTGRES_DB`: PostgreSQL database name.
+- `DATABASE_URL`: Production PostgreSQL connection string.
+
+**GitHub Variables:**
+- `AWS_APP_URL`: Public AWS application URL used by k6, for example `https://aws.example.com`.
+- `RASPI_APP_URL`: Public Raspberry Pi application URL used by k6.
+- `RUN_DATABASE_SEED`: Set to `true` only when production data should be replaced with sample seed data. Leave unset/`false` for normal deployments.
+
+The performance thresholds are defined in `loadtest/site.js`: fewer than 1% failed requests, P95 below 1.5 seconds, P99 below 2.5 seconds, and more than 99% successful checks.
 
 <!-- Update terbaru dari Lead di main -->
 <!-- Update main oleh DevOps -->
