@@ -29,10 +29,13 @@ flowchart TD
         Gate -- Branch == staging (Gagal) --> Notify_Fail[Stage 6: Discord Notify ❌]
     end
 
-    subgraph Production_Path [Jalur Branch Main: Build, Deploy & Test]
+    subgraph Production_Path [Jalur Branch Main: Build, Approval, Deploy & Test]
         Gate -- Branch == main (Lulus) --> Build_Push[Stage 3: Build & Publish Container\n- Docker Buildx multi-stage\n- Tag :latest & :SHA\n- Push ke GHCR ghcr.io]
 
-        Build_Push --> Runner_Prod[Stage 4: Deploy to Containment Server\n- Self-Hosted Runner: containment-server\n- Folder: $HOME/GSPE-Deployment\n- Container: gspe-app di Port 3000\n- DB Migration: prisma db push\n- Cleanup: docker image prune]
+        Build_Push --> Approval[Gate: Manual Approval Review\n- Environment: production\n- Reviewer: @AlfiMaulanaA\n- Tombol: Review deployments -> Approve and deploy]
+
+        Approval -- Disetujui (Approved) --> Runner_Prod[Stage 4: Deploy to Containment Server\n- Self-Hosted Runner: containment-server\n- Folder: $HOME/GSPE-Deployment\n- Container: gspe-app di Port 3000\n- DB Migration: prisma db push\n- Cleanup: docker image prune]
+        Approval -- Ditolak (Rejected) --> Notify_Fail
 
         Runner_Prod --> Smoke_Prod[Stage 5: Smoke Test k6\n- Uji Latency & Health di Port 3000]
 
@@ -47,9 +50,9 @@ flowchart TD
 ## ⚙️ 2. Peran Masing-Masing Branch
 
 | Branch | Peran / Fungsi | Alur Eksekusi CI/CD | Target Server Fisik |
-| :--- | :--- | :--- | :---: |
+| :--- | :--- | :--- | :--- |
 | **`staging`** | **Garda Pengujian & Validasi (CI Only)** | Menjalankan seluruh test suite (Linting, TypeScript compile, Vitest unit test, Prisma migration test, Next.js build test, CodeQL security scan). | **Tidak menyentuh server fisik** (Aman dari bentrok port / downtime) |
-| **`main`** / **`master`** | **Rilis Produksi (Continuous Deployment)** | Menjalankan seluruh test CI $\rightarrow$ Build Docker Image $\rightarrow$ Publish GHCR $\rightarrow$ Deploy ke Server Containment $\rightarrow$ k6 Smoke Test. | **Live di Port 3000** (`http://192.168.2.42:3000`) |
+| **`main`** / **`master`** | **Rilis Produksi (Continuous Deployment)** | Test CI $\rightarrow$ Build Image $\rightarrow$ Publish GHCR $\rightarrow$ **Manual Approval Gate (@AlfiMaulanaA)** $\rightarrow$ Deploy Server $\rightarrow$ k6 Smoke Test. | **Live di Port 3000** (`http://192.168.2.42:3000`) |
 
 ---
 
@@ -84,8 +87,18 @@ Pipeline didefinisikan pada [.github/workflows/deploy.yml](file:///.github/workf
   3. Mengaktifkan GitHub Actions cache (`type=gha`) agar build berikutnya berlangsung cepat.
   4. Mengunggah image ke **GitHub Container Registry (GHCR)** di `ghcr.io/alfimaulanaa/gspe-deployment`.
 
+### 🔹 Gate Khusus: Manual Approval Gate (`environment: production`)
+* **Mekanisme:** Sebelum kontainer dideploy ke server fisik, GitHub Actions akan **berhenti sementara (PAUSE)** dengan status `Waiting for review`.
+* **Reviewer:** Dibatasi hanya untuk reviewer yang ditentukan (akun GitHub `@AlfiMaulanaA`).
+* **Cara Melakukan Approve:**
+  1. Buka tab **Actions** di GitHub repository.
+  2. Buka run pipeline yang sedang berjalan (akan ada tanda status kuning *Waiting for review*).
+  3. Klik tombol **"Review deployments"**.
+  4. Centang environment **production**, lalu klik tombol **"Approve and deploy"** (atau *Reject* jika ingin membatalkan).
+* **Keuntungan:** Menghindari *accidental deployment* dan memberi Anda kontrol penuh kapan server produksi boleh di-update.
+
 ### 🔹 Tahap 4: Deploy to Production Server (`deploy-production`)
-* **Kondisi:** Dijalankan **HANYA** saat event `push` ke branch **`main`** atau **`master`**.
+* **Kondisi:** Dijalankan **HANYA** saat event `push` ke branch **`main`** atau **`master`** dan **SETELAH DISETUJUI (APPROVED)** oleh reviewer.
 * **Lingkungan:** Runner `containment-server` di mesin fisik `192.168.2.42`.
 * **Langkah-langkah:**
   1. Masuk ke direktori `$HOME/GSPE-Deployment`.
