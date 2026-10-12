@@ -1,41 +1,48 @@
 # 📘 Dokumentasi Lengkap Arsitektur CI/CD & Docker (NexaStore)
 
-Dokumen ini menjelaskan secara menyeluruh bagaimana sistem **Continuous Integration & Continuous Deployment (CI/CD)** serta **arsitektur kontainer Docker** bekerja pada proyek ini.
+Dokumen ini menjelaskan secara menyeluruh bagaimana sistem **Continuous Integration & Continuous Deployment (CI/CD)**, **pemisahan lingkungan Staging vs Production**, **arsitektur kontainer Docker**, serta **panduan linting kode per folder** bekerja pada proyek ini.
 
 ---
 
-## 🗺️ 1. Diagram Alur Kerja CI/CD
+## 🗺️ 1. Diagram Alur Kerja CI/CD (Staging & Production)
 
 ```mermaid
 flowchart TD
     subgraph Local [Developer Workspace]
-        Dev[Developer] -->|git push origin main / staging| GitHub[GitHub Repository]
+        Dev[Developer] -->|git push origin staging| Branch_Staging[Branch: staging]
+        Dev -->|git push origin main| Branch_Main[Branch: main / master]
     end
 
     subgraph GitHub_Actions [GitHub Actions Cloud Runner]
-        GitHub --> CI_Verify[Stage 1: Verify & Test\n- Postgres Service Container\n- Lint, Typecheck, Vitest Unit Test\n- Audit Critical Vuln\n- Build Standalone & Smoke Test]
-        GitHub --> CI_Security[Stage 2: CodeQL SAST\n- Security & Vulnerability Scan]
+        Branch_Staging --> CI_Verify[Stage 1: Verify & Test\n- Postgres Service Container\n- Lint, Typecheck, Vitest Unit Test\n- Audit Critical Vuln\n- Build Standalone & Smoke Test]
+        Branch_Main --> CI_Verify
+
+        Branch_Staging --> CI_Security[Stage 2: CodeQL SAST\n- Security & Vulnerability Scan]
+        Branch_Main --> CI_Security
 
         CI_Verify --> Gate{Lulus Semua Tes?}
         CI_Security --> Gate
 
-        Gate -- Ya (Event == push) --> Build_Push[Stage 3: Build & Publish Container\n- Docker Buildx multi-stage\n- Tag :latest / :staging & :SHA\n- Push to GHCR ghcr.io]
-        Gate -- Tidak --> Notify_Fail[Stage 6: Discord Notify ❌]
+        Gate -- Ya (Branch == staging) --> Build_Staging[Stage 3: Build & Publish Staging Image\n- Tag :staging & :SHA\n- Push to GHCR]
+        Gate -- Ya (Branch == main) --> Build_Prod[Stage 3: Build & Publish Prod Image\n- Tag :latest & :SHA\n- Push to GHCR]
+        Gate -- Gagal --> Notify_Fail[Stage 6: Discord Notify ❌]
     end
 
     subgraph Server [Containment Server 192.168.2.42]
-        Build_Push --> Runner[Stage 4: Self-Hosted Runner\n- containment-server daemon]
-        Runner --> Pull_Image[Docker Compose Pull Image SHA]
-        Pull_Image --> Up_Container[Docker Compose Up gspe-app]
-        Up_Container --> DB_Migrate[Prisma DB Push Auto Migration]
-        DB_Migrate --> Health_Check[Curl Health Check 3000]
+        Build_Staging --> Runner_Staging[Runner: containment-server-staging\nLabel: staging]
+        Runner_Staging --> Deploy_Staging[Stage 4: Deploy Staging Container\n- Folder: $HOME/GSPE-Deployment-Staging\n- Container: gspe-app-staging\n- Port Host: 3001\n- DB: gspe_staging]
+        Deploy_Staging --> Smoke_Staging[Stage 5: Smoke Test k6 Staging\n- Target: http://127.0.0.1:3001]
 
-        Health_Check --> Post_Smoke[Stage 5: Post-Deploy Smoke Test\n- k6 Performance Test]
+        Build_Prod --> Runner_Prod[Runner: containment-server\nLabel: production]
+        Runner_Prod --> Deploy_Prod[Stage 4: Deploy Production Container\n- Folder: $HOME/GSPE-Deployment\n- Container: gspe-app\n- Port Host: 3000\n- DB: gspe_deployment]
+        Deploy_Prod --> Smoke_Prod[Stage 5: Smoke Test k6 Production\n- Target: http://127.0.0.1:3000]
     end
 
     subgraph Notification [Discord Channel]
-        Post_Smoke -- Sukses --> Notify_Success[Stage 6: Discord Notify 🚀\n- Green Embed, Commit, Author, Logs]
-        Post_Smoke -- Gagal --> Notify_Fail
+        Smoke_Staging -- Sukses --> Notify_Staging[Stage 6: Discord Notify 🚀\n- Staging Succeeded on Port 3001]
+        Smoke_Prod -- Sukses --> Notify_Prod[Stage 6: Discord Notify 🚀\n- Production Succeeded on Port 3000]
+        Smoke_Staging -- Gagal --> Notify_Fail
+        Smoke_Prod -- Gagal --> Notify_Fail
     end
 ```
 
@@ -71,38 +78,88 @@ Pipeline didefinisikan pada [.github/workflows/deploy.yml](file:///.github/workf
      * Jika branch `staging` $\rightarrow$ Image diberi tag `:staging` dan `:<commit-sha>`.
      * Jika branch `main` $\rightarrow$ Image diberi tag `:latest` dan `:<commit-sha>`.
   2. Menggunakan **Docker Buildx** dengan platform target `linux/amd64`.
-  3. Mengaktifkan GitHub Actions cache (`type=gha`) agar build berikutnya berlangsung cepat (hanya layer yang berubah yang di-compile).
+  3. Mengaktifkan GitHub Actions cache (`type=gha`) agar build berikutnya berlangsung cepat.
   4. Mengunggah image ke **GitHub Container Registry (GHCR)** di `ghcr.io/alfimaulanaa/gspe-deployment`.
 
-### 🔹 Tahap 4: Deploy to Containment Server (`deploy-server`)
-* **Lingkungan:** **Self-Hosted Runner** bertag `[self-hosted, linux, X64, deployment]` yang terpasang langsung di server fisik Containment (`192.168.2.42`).
-* **Langkah-langkah:**
-  1. Runner membaca direktori `$HOME/GSPE-Deployment` di server containment.
-  2. Login ke GHCR menggunakan token aman GitHub Actions.
-  3. Mengambil image baru yang spesifik berdasarkan commit SHA (`APP_IMAGE`).
-  4. Menjalankan `docker compose up -d --remove-orphans` untuk mematikan container lama dan menyalakan container baru tanpa downtime lama.
-  5. Menjalankan migrasi skema database di dalam container produksi:
-     ```bash
-     docker exec gspe-app npx prisma db push
-     ```
-  6. Loop polling `curl` selama 30 percobaan ke `http://127.0.0.1:3000/` untuk memastikan aplikasi sehat dan melayani request.
+### 🔹 Tahap 4: Deploy Terisolasi (Staging vs Production)
+GitHub Actions menggunakan **runner label** untuk menembak daemon runner yang tepat:
+* **Jika Branch `staging` $\rightarrow$ Job `deploy-staging`:**
+  * Dijalankan oleh runner bertag `[self-hosted, linux, X64, staging]`.
+  * Masuk ke folder `$HOME/GSPE-Deployment-Staging`.
+  * Memasang [docker-compose.staging.yml](file:///docker-compose.staging.yml).
+  * Menyalakan container `gspe-app-staging` di port **3001** dengan database terpisah `gspe_staging`.
+* **Jika Branch `main` $\rightarrow$ Job `deploy-production`:**
+  * Dijalankan oleh runner bertag `[self-hosted, linux, X64, production]`.
+  * Masuk ke folder `$HOME/GSPE-Deployment`.
+  * Memasang [docker-compose.yml](file:///docker-compose.yml).
+  * Menyalakan container `gspe-app` di port **3000** dengan database utama `gspe_deployment`.
 
-### 🔹 Tahap 5: Post-Deployment Smoke Test (`smoke-test-server`)
-* Menggunakan reusable workflow [.github/workflows/performance-test.yml](file:///.github/workflows/performance-test.yml).
-* Menjalankan script **k6** ([loadtest/site.js](file:///loadtest/site.js)) langsung dari runner untuk menguji respon latency HTTP 200 dengan kriteria:
-  * P95 latency di bawah 1.5 detik
-  * Tingkat keberhasilan request di atas 99%
+### 🔹 Tahap 5: Post-Deployment Smoke Test
+* Menjalankan script **k6** ([loadtest/site.js](file:///loadtest/site.js)) menggunakan runner yang bersangkutan:
+  * Staging menguji endpoint `http://127.0.0.1:3001`.
+  * Production menguji endpoint `http://127.0.0.1:3000`.
 
 ### 🔹 Tahap 6: Discord Deployment Notification (`notify`)
 * Berjalan otomatis (`if: always() && github.event_name == 'push'`).
-* Membaca secret `DISCORD_WEBHOOK` yang tersimpan di GitHub Secrets.
-* Mengirim notifikasi **Discord Rich Embed**:
-  * 🟢 **Hijau (`#57F287`):** Menandakan aplikasi sukses di-build, dideploy, dan lolos smoke test.
-  * 🔴 **Merah (`#ED4245`):** Menandakan ada kegagalan, lengkap dengan rincian tahap mana yang gagal dan tombol pintas ke log run GitHub Actions.
+* Bot mengirimkan **Discord Rich Embed**:
+  * Menyebutkan secara akurat nama lingkungan: `Staging (Port 3001)` atau `Production (Port 3000)`.
+  * 🟢 **Hijau (`#57F287`):** Deploy & Smoke test sukses.
+  * 🔴 **Merah (`#ED4245`):** Gagal, dengan tombol langsung ke log GitHub Actions.
 
 ---
 
-## 🐳 3. Bedah Arsitektur File Docker (`Dockerfile`)
+## 🔍 3. Panduan Linting & Validasi Kode (ESLint)
+
+### ❓ "Apakah untuk cek lint itu bisa ke spesifik folder?"
+**JAWABANNYA: BISA BANGET!**
+
+Secara bawaan, ESLint dapat diarahkan langsung ke path folder atau file tertentu yang ingin Anda periksa tanpa harus memindai seluruh proyek.
+
+### 📌 Cara Menggunakan Linting Spesifik Folder:
+
+#### 1. Menggunakan Shortcut `npm run` (Sudah Ditambahkan ke `package.json`)
+Di file [package.json](file:///package.json), kita telah menyiapkan script pintas:
+```bash
+# Periksa hanya folder components (ProductCard, Dashboard, ProductForm)
+npm run lint:components
+
+# Periksa hanya folder app (page.tsx, layout.tsx, Server Actions)
+npm run lint:app
+
+# Periksa hanya folder lib (prisma client, validasi produk)
+npm run lint:lib
+
+# Auto-fix kesalahan styling/formatting yang bisa diperbaiki otomatis
+npm run lint:fix
+```
+
+#### 2. Menggunakan Argumen CLI Langsung (`npx eslint` atau `npm run lint --`)
+Anda bisa memeriksa folder atau file kustom apa pun secara dinamis:
+```bash
+# Memeriksa folder spesifik
+npx eslint src/components/
+npx eslint src/app/actions/
+
+# Memeriksa file spesifik saja
+npx eslint src/components/ProductCard.tsx
+
+# Melewatkan folder argumen melalui npm run lint
+npm run lint -- src/components/
+npm run lint -- src/lib/
+
+# Memeriksa beberapa folder sekaligus
+npx eslint src/components/ src/lib/
+```
+
+#### 3. Melakukan Perbaikan Otomatis (*Auto-fix*):
+Jika terdapat error seperti spasi berlebih, unused imports, atau format tanda kutip:
+```bash
+npx eslint src/components/ --fix
+```
+
+---
+
+## 🐳 4. Bedah Arsitektur File Docker (`Dockerfile`)
 
 Aplikasi menggunakan **Multi-Stage Build** 3 lapis untuk efisiensi ukuran image dan keamanan maksimal:
 
@@ -158,70 +215,35 @@ ENV HOSTNAME="0.0.0.0"
 CMD ["node", "server.js"]
 ```
 
-### Mengapa Desain Docker Ini Sangat Optimal?
-1. **Multi-Stage:** *Source code*, TypeScript compiler, dan file devDependencies (seperti ESLint, Vitest, tailwindcss) ditinggalkan di Stage 2 dan **tidak masuk** ke Image akhir di Stage 3.
-2. **Next.js Standalone Output:** Fitur `output: "standalone"` Next.js hanya mengemas node_modules yang benar-benar digunakan saat runtime. Ukuran container menyusut dari >1GB menjadi hanya sekitar ~150MB.
-3. **Non-Root Execution:** Container berjalan dengan user `nextjs` (UID 1001), bukan `root`, sehingga jika ada eksploitasi pada aplikasi, hacker tidak mendapatkan akses root ke server host.
-4. **Prisma Global:** Script seed di-bundle menjadi JavaScript tunggal via `esbuild`, menghilangkan ketergantungan runtime TypeScript (`tsx`).
+### Keuntungan Arsitektur Docker Ini:
+1. **Multi-Stage:** *Source code*, compiler TypeScript, dan library testing (Vitest, Tailwind CLI) ditinggalkan di Stage 2.
+2. **Next.js Standalone:** Mengurangi ukuran image dari >1.2GB menjadi hanya ~150MB.
+3. **Keamanan User Non-Root:** Berjalan dengan UID 1001 (`nextjs`), mencegah eskalasi hak akses server host.
+4. **Prisma Pre-bundled:** File seed dikonversi menjadi JS murni via `esbuild`.
 
 ---
 
-## 📦 4. Bedah Orkestrasi Container (`docker-compose.yml`)
+## 📦 5. Bedah Orkestrasi Container (`docker-compose.yml`)
 
-File [docker-compose.yml](file:///docker-compose.yml) di server containment mengatur 2 service yang saling terhubung:
+### File Produksi ([docker-compose.yml](file:///docker-compose.yml)):
+* Menjalankan `gspe-app` (Port 3000) dan `gspe-db` (Postgres 16, DB: `gspe_deployment`).
+* Memiliki `depends_on: condition: service_healthy` agar web server tidak menyala sebelum database siap.
 
-```yaml
-services:
-  app:
-    image: ${APP_IMAGE:-ghcr.io/alfimaulanaa/gspe-deployment:latest}
-    container_name: gspe-app
-    restart: always
-    ports:
-      - "3000:3000"
-    environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
-    depends_on:
-      db:
-        condition: service_healthy
-
-  db:
-    image: postgres:16-alpine
-    container_name: gspe-db
-    restart: always
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-gspe_admin}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-gspe_password}
-      - POSTGRES_DB=${POSTGRES_DB:-gspe_deployment}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  postgres_data:
-```
-
-* **`db` (PostgreSQL 16):** Memiliki healthcheck bawaan `pg_isready`. Data disimpan persisten pada volume Docker `postgres_data`.
-* **`app` (NexaStore):** Memiliki dependensi `depends_on: condition: service_healthy` ke service `db`, artinya container aplikasi **hanya akan menyala setelah PostgreSQL benar-benar siap menerima koneksi query**.
-* **Keamanan Kredensial:** Seluruh username dan password diambil dari file lokal host `/home/containment/GSPE-Deployment/.env` dan tidak pernah di-hardcode ke git.
+### File Staging ([docker-compose.staging.yml](file:///docker-compose.staging.yml)):
+* Menjalankan `gspe-app-staging` (Port 3001) dan `gspe-db-staging` (Postgres 16, DB: `gspe_staging`).
+* Volume penyimpanan terpisah (`postgres_staging_data`), menjamin data produksi tidak tersentuh saat staging diuji.
 
 ---
 
-## 🎯 5. Arsitektur Terpisah: Staging vs Production (Sudah Diimplementasikan)
+## 🎯 6. Ringkasan Parameter Lingkungan
 
-Sistem saat ini telah resmi dikonfigurasi dengan pemisahan lingkungan **100% independen** menggunakan **Dual-Runner & Dual-Container**:
-
-| Lingkungan | Branch Pemicu | Runner yang Aktif | Target Direktori di Server | Port Host | Container Name |
-| :--- | :--- | :--- | :--- | :---: | :--- |
-| **Staging** | `staging` | `containment-server-staging` (label: `staging`) | `$HOME/GSPE-Deployment-Staging` | **3001** | `gspe-app-staging` |
-| **Production** | `main` / `master` | `containment-server` (label: `production`) | `$HOME/GSPE-Deployment` | **3000** | `gspe-app` |
-
-### Keunggulan Arsitektur Ini:
-1. **Runner Terisolasi:** Push ke `staging` hanya ditangkap oleh runner staging. Runner production tidak akan terganggu.
-2. **Database Terpisah:** Staging menggunakan database `gspe_staging`, sehingga migrasi eksperimental tidak merusak data produksi `gspe_deployment`.
-3. **Port Berbeda:** Pengujian fitur staging dapat diakses live di `http://192.168.2.42:3001` tanpa mengganggu aplikasi produksi di `http://192.168.2.42:3000`.
-4. **Notifikasi Spesifik:** Bot Discord secara cerdas menyebutkan nama environment (`Staging (Port 3001)` atau `Production (Port 3000)`) pada setiap embed rilis.
-
+| Parameter | Lingkungan Staging | Lingkungan Production |
+| :--- | :--- | :--- |
+| **Branch Git** | `staging` | `main` / `master` |
+| **Runner Daemon** | `containment-server-staging` | `containment-server` |
+| **Runner Label** | `staging` | `production` |
+| **Folder Server** | `/home/containment/GSPE-Deployment-Staging` | `/home/containment/GSPE-Deployment` |
+| **Port Akses** | **`http://192.168.2.42:3001`** | **`http://192.168.2.42:3000`** |
+| **Container Name** | `gspe-app-staging` | `gspe-app` |
+| **Database Name** | `gspe_staging` | `gspe_deployment` |
+| **Image Tag GHCR** | `:staging` & `:<sha>` | `:latest` & `:<sha>` |
