@@ -158,7 +158,7 @@ jobs:
       # TRIVY CONTAINER VULNERABILITY SCANNER
       # ========================================================
       - name: Scan container image with Trivy (Security Vulnerability)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'table'
@@ -202,6 +202,43 @@ jobs:
       profile: smoke
 
   # ========================================================
+  # AUTOMATIC SEMVER TAG & GITHUB RELEASE
+  # ========================================================
+  release-tag:
+    name: Automatic SemVer Tag & Release
+    needs: smoke-test-production
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: '0'
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: anothrNick/github-tag-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WITH_V: true
+          DEFAULT_BUMP: patch
+          RELEASE_BRANCHES: main,master
+
+      - name: Create GitHub Release
+        if: steps.tag_version.outputs.new_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ========================================================
   # NOTIFIKASI DISCORD (PUSH KE MAIN ATAU STAGING)
   # ========================================================
   notify:
@@ -212,6 +249,7 @@ jobs:
       - build-and-push
       - deploy-production
       - smoke-test-production
+      - release-tag
     if: always() && github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
@@ -228,6 +266,7 @@ jobs:
           COMMIT_AUTHOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.release-tag.outputs.new_tag }}
         run: |
           if [ -z "$DISCORD_WEBHOOK" ]; then
             echo "DISCORD_WEBHOOK secret is not configured, skipping notification."
@@ -251,7 +290,11 @@ jobs:
             if [ "$DEPLOY_RESULT" = "success" ] && [ "$SMOKE_RESULT" = "success" ]; then
               COLOR=5763719
               STATUS_TITLE="🚀 Production Deployment Succeeded"
-              STATUS_DESC="Aplikasi berhasil diverifikasi, lolos scan Trivy, dan dideploy via Zero-Downtime Blue/Green di Port 3000."
+              if [ -n "$RELEASE_TAG" ]; then
+                STATUS_DESC="Aplikasi versi $RELEASE_TAG berhasil dideploy via Zero-Downtime Blue/Green di Port 3000."
+              else
+                STATUS_DESC="Aplikasi berhasil diverifikasi, lolos scan Trivy, dan dideploy via Zero-Downtime Blue/Green di Port 3000."
+              fi
             else
               COLOR=15548997
               STATUS_TITLE="❌ Production Deployment Failed"
@@ -262,6 +305,7 @@ jobs:
 
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
           CLEAN_MSG=$(echo "$COMMIT_MSG" | head -n 1 | tr -d '"\\')
+          TAG_VAL="${RELEASE_TAG:-$SHORT_SHA}"
 
           PAYLOAD=$(jq -n \
             --arg title "$STATUS_TITLE" \
@@ -271,6 +315,7 @@ jobs:
             --arg branch "$BRANCH_NAME" \
             --arg env "$ENV_LABEL" \
             --arg author "$COMMIT_AUTHOR" \
+            --arg tag "$TAG_VAL" \
             --arg commit "[$SHORT_SHA] $CLEAN_MSG" \
             --arg run_url "$RUN_URL" \
             --arg ts "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
@@ -286,6 +331,7 @@ jobs:
                     { name: "Repository", value: $repo, inline: true },
                     { name: "Pipeline Role", value: $env, inline: true },
                     { name: "Branch", value: $branch, inline: true },
+                    { name: "Release / Tag", value: $tag, inline: true },
                     { name: "Author", value: $author, inline: true },
                     { name: "Commit", value: $commit, inline: false },
                     { name: "Pipeline Logs", value: ("[Lihat Detail Run di GitHub Actions](" + $run_url + ")"), inline: false }

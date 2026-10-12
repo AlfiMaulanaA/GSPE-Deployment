@@ -43,12 +43,12 @@ flowchart TD
         HealthCheck -- Gagal --> Auto_Rollback[🔄 Automated Rollback!\n- Matikan Container Rusak\n- Container Lama Tetap Aktif\n- ZERO USER DOWNTIME]
         Auto_Rollback --> Notify_Fail
 
-        HealthCheck -- Sukses --> Switch_Nginx[⚡ Zero-Downtime Switch\n- Migrasi DB: prisma db push\n- Update Nginx upstream.inc\n- Nginx Reload: 0.001s tanpa putus koneksi\n- Matikan Container Lama]
-
         Switch_Nginx --> Smoke_Prod[Stage 5: Smoke Test k6\n- Uji Latency & Health di Port 3000]
 
-        Smoke_Prod -- Sukses --> Notify_Prod_Pass[Stage 6: Discord Notify 🚀\n- Production Deployment Succeeded\n- Port 3000 Live]
+        Smoke_Prod -- Sukses --> SemVer[Stage 5.5: Automatic SemVer Tag & Release\n- anothrNick/github-tag-action\n- Bump Patch/Minor/Major otomatis\n- softprops/action-gh-release: Buat Release + Changelog]
         Smoke_Prod -- Gagal --> Notify_Fail
+
+        SemVer --> Notify_Prod_Pass[Stage 6: Discord Notify 🚀\n- Production Deployment Succeeded\n- Info Tag Versi Baru & Port 3000 Live]
         Approval -- Ditolak (Rejected) --> Notify_Fail
         Build_Push -- Gagal --> Notify_Fail
     end
@@ -61,7 +61,7 @@ flowchart TD
 | Branch | Peran / Fungsi | Alur Eksekusi CI/CD | Target Server Fisik |
 | :--- | :--- | :--- | :--- |
 | **`staging`** | **Garda Pengujian & Validasi (CI Only)** | Menjalankan seluruh test suite (Linting, TypeScript compile, Vitest unit test, Prisma migration test, Next.js build test, CodeQL security scan). | **Tidak menyentuh server fisik** (Aman dari bentrok port / downtime) |
-| **`main`** / **`master`** | **Rilis Produksi (Continuous Deployment)** | Test CI $\rightarrow$ Build Image $\rightarrow$ Trivy CVE Scan $\rightarrow$ **Manual Approval Gate (@AlfiMaulanaA)** $\rightarrow$ **Zero-Downtime Deploy & Auto-Rollback** $\rightarrow$ k6 Smoke Test. | **Live di Port 3000** (`http://192.168.2.42:3000`) |
+| **`main`** / **`master`** | **Rilis Produksi (Continuous Deployment)** | Test CI $\rightarrow$ Build Image $\rightarrow$ Trivy Scan $\rightarrow$ **Approval Gate** $\rightarrow$ **Zero-Downtime Deploy & Rollback** $\rightarrow$ k6 Test $\rightarrow$ **SemVer Tag & Release**. | **Live di Port 3000** (`http://192.168.2.42:3000`) |
 
 ---
 
@@ -121,6 +121,16 @@ Pipeline didefinisikan pada [.github/workflows/deploy.yml](file:///.github/workf
 
 ### 🔹 Tahap 5: Post-Deployment Smoke Test (`smoke-test-production`)
 * Menjalankan script **k6** ([loadtest/site.js](file:///loadtest/site.js)) langsung dari runner untuk menguji respon latency HTTP 200 di port **3000**.
+
+### 🔹 Tahap 5.5: Automatic SemVer Tag & GitHub Release (`release-tag`)
+* **Kondisi:** Dijalankan **HANYA** saat push ke branch **`main`** atau **`master`** dan **SETELAH** smoke test pasca-deploy berhasil.
+* **Mekanisme Otomatis:**
+  * Menggunakan `anothrNick/github-tag-action` untuk membaca pola pesan commit (*Semantic Versioning*):
+    * `fix: ...` ➔ Menaikkan versi **Patch** (contoh: `v1.0.0` ➔ `v1.0.1`).
+    * `feat: ...` ➔ Menaikkan versi **Minor** (contoh: `v1.0.1` ➔ `v1.1.0`).
+    * `BREAKING CHANGE:` ➔ Menaikkan versi **Major** (contoh: `v1.1.0` ➔ `v2.0.0`).
+  * Pipeline otomatis membuat Git tag baru dan mem-push tag ke repositori.
+  * Menggunakan `softprops/action-gh-release` untuk menerbitkan halaman **GitHub Releases** resmi lengkap dengan catatan perubahan (*auto-generated changelog*).
 
 ### 🔹 Tahap 6: Discord Deployment Notification (`notify`)
 * Berjalan otomatis (`if: always() && github.event_name == 'push'`).
@@ -208,3 +218,35 @@ Arsitektur kontainer di server fisik (`192.168.2.42`) menggunakan arsitektur **R
 * **Container `gspe-db`:** PostgreSQL 16 Alpine berjalan di port **`5432`** dengan healthcheck bawaan `pg_isready`.
 * **Isolasi Kredensial:** Seluruh username dan password diambil langsung dari file terlindung `/home/containment/GSPE-Deployment/.env`.
 * **Folder Backups:** Terletak di `/home/containment/GSPE-Deployment/backups` yang otomatis menyimpan snapshot database setiap kali rilis dilakukan.
+
+---
+
+## 🛠️ 7. Panduan Instalasi Self-Hosted Runner pada Server Fisik
+
+Panduan lengkap, langkah demi langkah, dan panduan perintah praktis untuk memasang runner baru di server Ubuntu/Linux telah didokumentasikan secara khusus pada:  
+👉 **[PANDUAN_INSTALLASI_RUNNER.md](file:///PANDUAN_INSTALLASI_RUNNER.md)**
+
+### 📌 Ringkasan Cepat Pemasangan Runner (4 Langkah):
+1. **Dapatkan Token Registrasi dari GitHub**:  
+   Buka GitHub ➔ **Settings** ➔ **Actions** ➔ **Runners** ➔ Klik **New self-hosted runner** (OS: Linux, Arch: x64).
+2. **Unduh & Ekstrak Runner Package**:
+   ```bash
+   mkdir -p ~/actions-runner && cd ~/actions-runner
+   curl -o actions-runner-linux-x64-2.337.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.337.0/actions-runner-linux-x64-2.337.0.tar.gz
+   tar xzf ./actions-runner-linux-x64-2.337.0.tar.gz
+   ```
+3. **Konfigurasi dengan Label Deployment**:
+   ```bash
+   ./config.sh --url https://github.com/AlfiMaulanaA/GSPE-Deployment \
+     --token <TOKEN_GITHUB> \
+     --name containment-server \
+     --labels self-hosted,linux,X64,deployment,production \
+     --work _work --unattended --replace
+   ```
+4. **Jalankan Sebagai Systemd Daemon (Auto-Start saat Server Reboot)**:
+   ```bash
+   sudo ./svc.sh install
+   sudo ./svc.sh start
+   sudo ./svc.sh status
+   ```
+
