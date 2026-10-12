@@ -2,6 +2,8 @@ import React from 'react'
 import { Package2 } from 'lucide-react'
 
 export default function Navbar() {
+  const version = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || 'v1.0.0'
+
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/50 backdrop-blur-xl">
       <div className="container mx-auto flex h-20 items-center justify-between px-6">
@@ -10,7 +12,12 @@ export default function Navbar() {
             <Package2 className="text-white" size={24} />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-white">NEXA<span className="text-indigo-400">STORE</span></h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold tracking-tight text-white">NEXA<span className="text-indigo-400">STORE</span></h1>
+              <span className="inline-flex items-center rounded-full bg-indigo-500/10 px-2 py-0.5 text-[11px] font-mono font-medium text-indigo-400 border border-indigo-500/20 shadow-sm">
+                {version}
+              </span>
+            </div>
             <p className="text-[10px] uppercase tracking-[0.2em] text-white/50">Management System</p>
           </div>
         </div>

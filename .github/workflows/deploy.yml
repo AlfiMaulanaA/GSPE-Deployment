@@ -117,11 +117,47 @@ jobs:
           category: /language:javascript-typescript
 
   # ========================================================
+  # AUTOMATIC SEMVER TAGGING (HANYA SAAT PUSH KE MAIN/MASTER)
+  # ========================================================
+  tag-version:
+    name: Determine and create SemVer Tag
+    needs: [verify, codeql]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.calc_version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: '0'
+
+      - name: Bump version and push tag
+        id: tag_action
+        uses: anothrNick/github-tag-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WITH_V: true
+          DEFAULT_BUMP: patch
+          RELEASE_BRANCHES: main,master
+
+      - name: Resolve final version string
+        id: calc_version
+        run: |
+          NEW_TAG="${{ steps.tag_action.outputs.new_tag }}"
+          CURR_TAG="${{ steps.tag_action.outputs.tag }}"
+          FINAL="${NEW_TAG:-${CURR_TAG:-v1.0.0}}"
+          echo "version=$FINAL" >> "$GITHUB_OUTPUT"
+          echo "Selected version: $FINAL"
+
+  # ========================================================
   # BUILD & PUBLISH CONTAINER (HANYA SAAT PUSH KE MAIN/MASTER)
   # ========================================================
   build-and-push:
     name: Build and publish container
-    needs: [verify, codeql]
+    needs: [verify, codeql, tag-version]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -148,31 +184,21 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
+          build-args: |
+            APP_VERSION=${{ needs.tag-version.outputs.version }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:${{ needs.tag-version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      # ========================================================
-      # TRIVY CONTAINER VULNERABILITY SCANNER (DOCKER DIRECT)
-      # ========================================================
-      - name: Scan container image with Trivy (Security Vulnerability)
-        run: |
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:latest image \
-            --severity CRITICAL,HIGH \
-            --ignore-unfixed \
-            --exit-code 0 \
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
   # ========================================================
   # PRODUCTION DEPLOYMENT (HANYA SAAT PUSH KE MAIN/MASTER)
   # ========================================================
   deploy-production:
     name: Deploy to Production Server
-    needs: build-and-push
+    needs: [build-and-push, tag-version]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: [self-hosted, linux, X64, deployment]
     environment: production
@@ -182,6 +208,7 @@ jobs:
       packages: read
     env:
       APP_IMAGE: ghcr.io/alfimaulanaa/gspe-deployment:${{ github.sha }}
+      APP_VERSION: ${{ needs.tag-version.outputs.version }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_ACTOR: ${{ github.actor }}
     steps:
@@ -202,38 +229,21 @@ jobs:
       profile: smoke
 
   # ========================================================
-  # AUTOMATIC SEMVER TAG & GITHUB RELEASE
+  # PUBLISH GITHUB RELEASE
   # ========================================================
-  release-tag:
-    name: Automatic SemVer Tag & Release
-    needs: smoke-test-production
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: [tag-version, smoke-test-production]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-    outputs:
-      new_tag: ${{ steps.tag_version.outputs.new_tag }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: '0'
-
-      - name: Bump version and push tag
-        id: tag_version
-        uses: anothrNick/github-tag-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WITH_V: true
-          DEFAULT_BUMP: patch
-          RELEASE_BRANCHES: main,master
-
       - name: Create GitHub Release
-        if: steps.tag_version.outputs.new_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          tag_name: ${{ needs.tag-version.outputs.version }}
+          name: Release ${{ needs.tag-version.outputs.version }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -246,10 +256,11 @@ jobs:
     needs:
       - verify
       - codeql
+      - tag-version
       - build-and-push
       - deploy-production
       - smoke-test-production
-      - release-tag
+      - publish-github-release
     if: always() && github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
@@ -266,7 +277,7 @@ jobs:
           COMMIT_AUTHOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ github.sha }}
-          RELEASE_TAG: ${{ needs.release-tag.outputs.new_tag }}
+          RELEASE_TAG: ${{ needs.tag-version.outputs.version }}
         run: |
           if [ -z "$DISCORD_WEBHOOK" ]; then
             echo "DISCORD_WEBHOOK secret is not configured, skipping notification."

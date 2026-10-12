@@ -17,6 +17,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-gspe_admin}:${POSTGRES_PASSWORD:-gspe_password}@db:5432/${POSTGRES_DB:-gspe_deployment}?schema=public
       - NEXT_TELEMETRY_DISABLED=1
+      - APP_VERSION=${APP_VERSION:-v1.0.0}
+      - NEXT_PUBLIC_APP_VERSION=${APP_VERSION:-v1.0.0}
     depends_on:
       db:
         condition: service_healthy
@@ -28,6 +30,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-gspe_admin}:${POSTGRES_PASSWORD:-gspe_password}@db:5432/${POSTGRES_DB:-gspe_deployment}?schema=public
       - NEXT_TELEMETRY_DISABLED=1
+      - APP_VERSION=${APP_VERSION:-v1.0.0}
+      - NEXT_PUBLIC_APP_VERSION=${APP_VERSION:-v1.0.0}
     depends_on:
       db:
         condition: service_healthy

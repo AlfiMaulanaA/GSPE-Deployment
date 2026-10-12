@@ -14,6 +14,9 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+ARG APP_VERSION=v1.0.0
+ENV NEXT_PUBLIC_APP_VERSION=$APP_VERSION
+ENV APP_VERSION=$APP_VERSION
 
 # Generate Client
 RUN npx prisma generate
@@ -31,6 +34,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG APP_VERSION=v1.0.0
+ENV NEXT_PUBLIC_APP_VERSION=$APP_VERSION
+ENV APP_VERSION=$APP_VERSION
 
 # Install PRISMA global (Hanya prisma, tidak butuh tsx lagi)
 RUN npm install -g prisma@7.10.0

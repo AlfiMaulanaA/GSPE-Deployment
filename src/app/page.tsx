@@ -11,14 +11,25 @@ export default async function Home() {
     getStats(),
   ])
 
+  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || 'v1.0.0'
+
   return (
-    <div className="min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200">
-      <Navbar />
-      <Dashboard
-        initialProducts={products}
-        initialTypes={types}
-        initialStats={stats}
-      />
+    <div className="min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200 flex flex-col justify-between">
+      <div>
+        <Navbar />
+        <Dashboard
+          initialProducts={products}
+          initialTypes={types}
+          initialStats={stats}
+        />
+      </div>
+
+      {/* Footer System Version */}
+      <footer className="mt-16 border-t border-white/5 py-8 text-center text-xs text-white/40">
+        <p>
+          NexaStore Management System &middot; Version <span className="font-mono text-indigo-400 font-semibold">{appVersion}</span> &middot; Zero-Downtime High Availability
+        </p>
+      </footer>
       
       {/* Background Decorative Elements */}
       <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">

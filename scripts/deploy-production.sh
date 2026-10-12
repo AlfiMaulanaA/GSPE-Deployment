@@ -57,11 +57,11 @@ fi
 
 # 5. Pull Image Baru untuk Target Container
 echo "📥 Menarik Docker Image baru (${APP_IMAGE})..."
-APP_IMAGE="${APP_IMAGE}" docker compose pull "app_${TARGET}"
+APP_IMAGE="${APP_IMAGE}" APP_VERSION="${APP_VERSION:-v1.0.0}" docker compose pull "app_${TARGET}"
 
 # 6. Jalankan Target Container Baru
-echo "🚀 Menyalakan target container baru (gspe-app-${TARGET})..."
-APP_IMAGE="${APP_IMAGE}" docker compose up -d "app_${TARGET}"
+echo "🚀 Menyalakan target container baru (gspe-app-${TARGET}) dengan versi ${APP_VERSION:-v1.0.0}..."
+APP_IMAGE="${APP_IMAGE}" APP_VERSION="${APP_VERSION:-v1.0.0}" docker compose up -d "app_${TARGET}"
 
 # 7. Internal Health Check pada Container Baru (Fail-safe Rollback)
 echo "🩺 Melakukan health check internal pada gspe-app-${TARGET}..."

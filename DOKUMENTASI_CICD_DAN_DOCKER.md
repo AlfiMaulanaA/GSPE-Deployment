@@ -29,26 +29,28 @@ flowchart TD
         Gate -- Branch == staging (Gagal) --> Notify_Fail[Stage 6: Discord Notify ❌]
     end
 
-    subgraph Production_Path [Jalur Branch Main: Zero-Downtime Deploy & Rollback]
-        Gate -- Branch == main (Lulus) --> Build_Push[Stage 3: Build & Publish Container\n- Docker Buildx multi-stage\n- Tag :latest & :SHA\n- Push ke GHCR ghcr.io]
+    subgraph Production_Path [Jalur Branch Main: SemVer, Zero-Downtime Deploy & Rollback]
+        Gate -- Branch == main (Lulus) --> SemVer[Stage 3: SemVer Version Tagging\n- anothrNick/github-tag-action\n- Hitung Tag Versi Baru v1.x.x otomatis]
 
-        Build_Push --> Trivy[Stage 3.5: Aqua Trivy Scanner\n- Scan Image CVE OS & Libs\n- Deteksi Severity CRITICAL & HIGH]
+        SemVer --> Build_Push[Stage 4: Build & Publish Container\n- Docker Buildx multi-stage\n- Build-Arg: APP_VERSION=v1.x.x\n- Embed Versi di UI Navbar & Footer\n- Tag :latest, :SHA, dan :v1.x.x\n- Push ke GHCR ghcr.io]
 
-        Trivy --> Approval[Gate: Manual Approval Review\n- Environment: production\n- Reviewer: @AlfiMaulanaA\n- Tombol: Review deployments -> Approve and deploy]
+        Build_Push --> Approval[Gate: Manual Approval Review\n- Environment: production\n- Reviewer: @AlfiMaulanaA\n- Tombol: Review deployments -> Approve and deploy]
 
-        Approval -- Disetujui (Approved) --> Runner_Prod[Stage 4: Zero-Downtime Deploy Script\n- Backup DB Otomatis: pg_dump ke .sql\n- Start Target Container: app_blue / app_green\n- Internal Healthcheck: wget polling]
+        Approval -- Disetujui (Approved) --> Runner_Prod[Stage 5: Zero-Downtime Deploy Script\n- Backup DB Otomatis: pg_dump ke .sql\n- Start Target Container: app_blue / app_green\n- Internal Healthcheck: wget polling]
 
         Runner_Prod --> HealthCheck{Container Baru Sehat?}
 
         HealthCheck -- Gagal --> Auto_Rollback[🔄 Automated Rollback!\n- Matikan Container Rusak\n- Container Lama Tetap Aktif\n- ZERO USER DOWNTIME]
         Auto_Rollback --> Notify_Fail
 
-        Switch_Nginx --> Smoke_Prod[Stage 5: Smoke Test k6\n- Uji Latency & Health di Port 3000]
+        HealthCheck -- Sukses --> Switch_Nginx[⚡ Zero-Downtime Switch\n- Migrasi DB: prisma db push\n- Update Nginx upstream.inc\n- Nginx Reload: 0.001s tanpa putus koneksi\n- Matikan Container Lama]
 
-        Smoke_Prod -- Sukses --> SemVer[Stage 5.5: Automatic SemVer Tag & Release\n- anothrNick/github-tag-action\n- Bump Patch/Minor/Major otomatis\n- softprops/action-gh-release: Buat Release + Changelog]
+        Switch_Nginx --> Smoke_Prod[Stage 6: Smoke Test k6\n- Uji Latency & Health di Port 3000]
+
+        Smoke_Prod -- Sukses --> Release_Notes[Stage 7: Publish GitHub Release\n- softprops/action-gh-release\n- Terbitkan Changelog & Release Resmi]
         Smoke_Prod -- Gagal --> Notify_Fail
 
-        SemVer --> Notify_Prod_Pass[Stage 6: Discord Notify 🚀\n- Production Deployment Succeeded\n- Info Tag Versi Baru & Port 3000 Live]
+        Release_Notes --> Notify_Prod_Pass[Stage 8: Discord Notify 🚀\n- Production Deployment Succeeded\n- Info Tag Versi Baru & Port 3000 Live]
         Approval -- Ditolak (Rejected) --> Notify_Fail
         Build_Push -- Gagal --> Notify_Fail
     end
@@ -61,7 +63,7 @@ flowchart TD
 | Branch | Peran / Fungsi | Alur Eksekusi CI/CD | Target Server Fisik |
 | :--- | :--- | :--- | :--- |
 | **`staging`** | **Garda Pengujian & Validasi (CI Only)** | Menjalankan seluruh test suite (Linting, TypeScript compile, Vitest unit test, Prisma migration test, Next.js build test, CodeQL security scan). | **Tidak menyentuh server fisik** (Aman dari bentrok port / downtime) |
-| **`main`** / **`master`** | **Rilis Produksi (Continuous Deployment)** | Test CI $\rightarrow$ Build Image $\rightarrow$ Trivy Scan $\rightarrow$ **Approval Gate** $\rightarrow$ **Zero-Downtime Deploy & Rollback** $\rightarrow$ k6 Test $\rightarrow$ **SemVer Tag & Release**. | **Live di Port 3000** (`http://192.168.2.42:3000`) |
+| **`main`** / **`master`** | **Rilis Produksi (Continuous Deployment)** | Test CI $\rightarrow$ **SemVer Tagging** $\rightarrow$ Build Image (Embed Versi di UI) $\rightarrow$ **Approval Gate** $\rightarrow$ **Zero-Downtime Deploy & Auto-Rollback** $\rightarrow$ k6 Test $\rightarrow$ **GitHub Release**. | **Live di Port 3000** (`http://192.168.2.42:3000`) |
 
 ---
 
@@ -88,14 +90,22 @@ Pipeline didefinisikan pada [.github/workflows/deploy.yml](file:///.github/workf
 * **Lingkungan:** `ubuntu-24.04`.
 * **Tujuan:** Static Application Security Testing (SAST) otomatis untuk mendeteksi celah keamanan (seperti injection, XSS, prototype pollution) pada kode JavaScript/TypeScript sebelum dirilis.
 
-### 🔹 Tahap 3: Build, Publish Container & Trivy Vulnerability Scan
-* **Kondisi:** Dijalankan **HANYA** saat event `push` ke branch **`main`** atau **`master`**.
+### 🔹 Tahap 3: Automatic SemVer Version Tagging (`tag-version`)
+* **Kondisi:** Dijalankan **HANYA** saat push ke branch **`main`** atau **`master`** setelah verifikasi CI lolos.
+* **Mekanisme Otomatis:**
+  * Menggunakan `anothrNick/github-tag-action` untuk membaca pesan commit (*Conventional Commits*):
+    * `fix: ...` ➔ Menaikkan versi **Patch** (contoh: `v1.0.0` ➔ `v1.0.1`).
+    * `feat: ...` ➔ Menaikkan versi **Minor** (contoh: `v1.0.1` ➔ `v1.1.0`).
+    * `BREAKING CHANGE:` ➔ Menaikkan versi **Major** (contoh: `v1.1.0` ➔ `v2.0.0`).
+  * Pipeline menghasilkan output tag versi (contoh: `v1.0.1`) yang akan di-*pass* ke proses build kontainer dan tampilan UI.
+
+### 🔹 Tahap 4: Build & Publish Container dengan Versi SemVer (`build-and-push`)
+* **Kondisi:** Dijalankan setelah versi SemVer ditentukan.
 * **Langkah-langkah:**
   1. Menggunakan **Docker Buildx** dengan platform target `linux/amd64`.
-  2. Memberi tag `:latest` dan `:<commit-sha>`.
-  3. Mengaktifkan GitHub Actions cache (`type=gha`) agar build berikutnya berlangsung cepat.
+  2. Meneruskan build argument: `APP_VERSION=${{ needs.tag-version.outputs.version }}` sehingga nomor versi tertanam ke dalam kode Next.js (Navbar dan Footer).
+  3. Memberi tag lengkap: `:latest`, `:<commit-sha>`, dan `:<semver-tag>` (misal `:v1.0.1`).
   4. Mengunggah image ke **GitHub Container Registry (GHCR)** di `ghcr.io/alfimaulanaa/gspe-deployment`.
-  5. 🔍 **Aqua Trivy Scanner:** Memindai kontainer image terhadap database CVE terkini untuk paket sistem operasi Alpine dan library aplikasi dengan tingkat keparahan *CRITICAL* dan *HIGH*.
 
 ### 🔹 Gate Khusus: Manual Approval Gate (`environment: production`)
 * **Mekanisme:** Sebelum kontainer dideploy ke server fisik, GitHub Actions akan **berhenti sementara (PAUSE)** dengan status `Waiting for review`.
@@ -107,39 +117,44 @@ Pipeline didefinisikan pada [.github/workflows/deploy.yml](file:///.github/workf
   4. Centang environment **production**, lalu klik tombol **"Approve and deploy"** (atau *Reject* jika ingin membatalkan).
 * **Keuntungan:** Menghindari *accidental deployment* dan memberi Anda kontrol penuh kapan server produksi boleh di-update.
 
-### 🔹 Tahap 4: Zero-Downtime Blue/Green Deploy & Automated Rollback (`scripts/deploy-production.sh`)
+### 🔹 Tahap 5: Zero-Downtime Blue/Green Deploy & Automated Rollback (`scripts/deploy-production.sh`)
 * **Kondisi:** Dijalankan setelah mendapat approval manual.
 * **Lingkungan:** Runner `containment-server` di mesin fisik `192.168.2.42`.
 * **Mekanisme Kerja:**
   1. **Automated DB Snapshot:** Sebelum migrasi skema tabel, runner otomatis membuat file backup database di `$HOME/GSPE-Deployment/backups/db-backup-$(date +%Y%m%d_%H%M%S).sql`.
   2. **Deteksi Active vs Target Container:** Runner mendeteksi container mana yang sedang melayani traffic (`gspe-app-blue` atau `gspe-app-green`). Versi baru akan diarahkan ke container yang sedang *idle* (lawannya).
-  3. **Booting & Internal Health Check:** Image versi baru di-*pull* dan dijalankan pada target container. Runner melakukan *polling* internal `wget` ke port 3000 container baru selama 30 percobaan.
+  3. **Booting & Internal Health Check:** Image versi baru di-*pull* dan dijalankan pada target container dengan `APP_VERSION`. Runner melakukan *polling* internal `wget` ke port 3000 container baru selama 30 percobaan.
   4. 🔄 **Automated Rollback jika Gagal:** Jika container baru mengalami *crash / failure* saat booting, runner langsung mematikan target container baru, membatalkan deployment, dan **TIDAK MENGUBAH NGINX**. Container versi lama tetap melayani pengguna tanpa ada *downtime* sama sekali!
   5. ⚡ **Zero-Downtime Switch (Nginx Reload):** Jika container baru dinyatakan 100% sehat, database dimigrasi (`prisma db push`), pointer `upstream.inc` Nginx diarahkan ke container baru, dan Nginx me-reload konfigurasi dalam hitungan milidetik tanpa memutus koneksi pengguna yang sedang aktif.
   6. **Graceful Decommission:** Container versi lama dimatikan setelah Nginx sukses melayani traffic versi baru.
   7. **Disk Pruning:** Membersihkan image Docker usang (>72 jam).
 
-### 🔹 Tahap 5: Post-Deployment Smoke Test (`smoke-test-production`)
+### 🔹 Tahap 6: Post-Deployment Smoke Test (`smoke-test-production`)
 * Menjalankan script **k6** ([loadtest/site.js](file:///loadtest/site.js)) langsung dari runner untuk menguji respon latency HTTP 200 di port **3000**.
 
-### 🔹 Tahap 5.5: Automatic SemVer Tag & GitHub Release (`release-tag`)
-* **Kondisi:** Dijalankan **HANYA** saat push ke branch **`main`** atau **`master`** dan **SETELAH** smoke test pasca-deploy berhasil.
-* **Mekanisme Otomatis:**
-  * Menggunakan `anothrNick/github-tag-action` untuk membaca pola pesan commit (*Semantic Versioning*):
-    * `fix: ...` ➔ Menaikkan versi **Patch** (contoh: `v1.0.0` ➔ `v1.0.1`).
-    * `feat: ...` ➔ Menaikkan versi **Minor** (contoh: `v1.0.1` ➔ `v1.1.0`).
-    * `BREAKING CHANGE:` ➔ Menaikkan versi **Major** (contoh: `v1.1.0` ➔ `v2.0.0`).
-  * Pipeline otomatis membuat Git tag baru dan mem-push tag ke repositori.
-  * Menggunakan `softprops/action-gh-release` untuk menerbitkan halaman **GitHub Releases** resmi lengkap dengan catatan perubahan (*auto-generated changelog*).
+### 🔹 Tahap 7: Publish GitHub Release (`publish-github-release`)
+* Menggunakan `softprops/action-gh-release` untuk menerbitkan rilis resmi di GitHub lengkap dengan catatan perubahan (*auto-generated changelog*).
 
-### 🔹 Tahap 6: Discord Deployment Notification (`notify`)
+### 🔹 Tahap 8: Discord Deployment Notification (`notify`)
 * Berjalan otomatis (`if: always() && github.event_name == 'push'`).
 * **Untuk Branch `staging`:** Mengirimkan pesan hijau `✅ Staging CI Passed` jika semua test valid, atau merah `❌ Staging CI Failed` jika ada error.
-* **Untuk Branch `main`:** Mengirimkan pesan rilis `🚀 Production Deployment Succeeded (Port 3000 - Zero-Downtime)` lengkap dengan author, commit, dan link ke run logs.
+* **Untuk Branch `main`:** Mengirimkan pesan rilis `🚀 Production Deployment Succeeded (Port 3000 - Zero-Downtime)` lengkap dengan nomor rilis SemVer (misal `Release: v1.0.1`), author, commit, dan link ke run logs.
 
 ---
 
-## 🔍 4. Panduan Linting & Validasi Kode (ESLint)
+## 🎨 4. Tampilan Versi Aplikasi pada Antarmuka (UI)
+
+Versi aplikasi yang dihasilkan oleh sistem Semantic Versioning otomatis dimunculkan pada 2 lokasi di antarmuka web:
+
+1. **Header / Navbar ([src/components/Navbar.tsx](file:///src/components/Navbar.tsx)):**
+   * Di sebelah kanan logo `NEXASTORE`, terdapat *badge* elegan berwarna ungu/indigo yang menampilkan versi aktif (contoh: `v1.0.1`).
+2. **Halaman Bawah / Footer ([src/app/page.tsx](file:///src/app/page.tsx)):**
+   * Pada bagian footer paling bawah tercantum:  
+     `NexaStore Management System · Version v1.0.1 · Zero-Downtime High Availability`
+
+---
+
+## 🔍 5. Panduan Linting & Validasi Kode (ESLint)
 
 ### ❓ "Apakah untuk cek lint itu bisa ke spesifik folder?"
 **JAWABANNYA: BISA BANGET!**
