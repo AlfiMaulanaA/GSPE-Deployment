@@ -12,6 +12,11 @@ on:
         required: false
         default: smoke
         type: string
+      runner_tag:
+        description: Runner environment label (e.g. staging or production or deployment)
+        required: false
+        default: deployment
+        type: string
   workflow_dispatch:
     inputs:
       target_url:
@@ -26,11 +31,16 @@ on:
         options:
           - smoke
           - load
+      runner_tag:
+        description: Runner environment label
+        required: false
+        default: deployment
+        type: string
 
 jobs:
   k6:
     name: k6 ${{ inputs.profile }} test
-    runs-on: [self-hosted, linux, X64, deployment]
+    runs-on: [self-hosted, linux, X64, "${{ inputs.runner_tag || 'deployment' }}"]
     timeout-minutes: 15
     permissions:
       contents: read

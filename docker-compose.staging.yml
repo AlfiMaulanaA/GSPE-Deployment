@@ -1,0 +1,31 @@
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/alfimaulanaa/gspe-deployment:staging}
+    container_name: gspe-app-staging
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@staging-db:5432/${POSTGRES_DB}?schema=public
+    depends_on:
+      staging-db:
+        condition: service_healthy
+
+  staging-db:
+    image: postgres:16-alpine
+    container_name: gspe-db-staging
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-gspe_staging_admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-staging_secret_password_2026}
+      - POSTGRES_DB=${POSTGRES_DB:-gspe_staging}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_staging_data:
