@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [main, master, staging]
   push:
-    branches: [main, master]
+    branches: [main, master, staging]
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -60,7 +60,7 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Unit tests
-        run: npm test
+        run: npm run test:ci
 
       - name: Audit critical production vulnerabilities
         run: npm audit --omit=dev --audit-level=critical
@@ -129,6 +129,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Determine container image tags
+        id: meta
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            echo "tags=${{ env.IMAGE_NAME }}:staging,${{ env.IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${{ env.IMAGE_NAME }}:latest,${{ env.IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -145,9 +154,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -198,3 +205,76 @@ jobs:
     with:
       target_url: http://127.0.0.1:3000
       profile: smoke
+
+  notify:
+    name: Discord Deployment Notification
+    needs: [verify, codeql, build-and-push, deploy-server, smoke-test-server]
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DEPLOY_RESULT: ${{ needs.deploy-server.result }}
+          SMOKE_RESULT: ${{ needs.smoke-test-server.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          CODEQL_RESULT: ${{ needs.codeql.result }}
+          BUILD_RESULT: ${{ needs.build-and-push.result }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_AUTHOR: ${{ github.actor }}
+          BRANCH_NAME: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK secret is not configured, skipping notification."
+            exit 0
+          fi
+
+          if [ "$DEPLOY_RESULT" = "success" ] && [ "$SMOKE_RESULT" = "success" ]; then
+            COLOR=5763719
+            STATUS_EMOJI="🚀"
+            STATUS_TITLE="Deployment Succeeded ($BRANCH_NAME)"
+            STATUS_DESC="Aplikasi NexaStore berhasil diverifikasi, di-build, dideploy, dan lulus uji performa di containment server."
+          else
+            COLOR=15548997
+            STATUS_EMOJI="❌"
+            STATUS_TITLE="Deployment Failed ($BRANCH_NAME)"
+            STATUS_DESC="Terjadi kegagalan pada pipeline CI/CD (Verify: $VERIFY_RESULT, CodeQL: $CODEQL_RESULT, Build: $BUILD_RESULT, Deploy: $DEPLOY_RESULT, Smoke: $SMOKE_RESULT)."
+          fi
+
+          SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
+          CLEAN_MSG=$(echo "$COMMIT_MSG" | head -n 1 | tr -d '"\\')
+
+          PAYLOAD=$(jq -n \
+            --arg title "$STATUS_EMOJI $STATUS_TITLE" \
+            --arg desc "$STATUS_DESC" \
+            --arg color "$COLOR" \
+            --arg repo "${{ github.repository }}" \
+            --arg branch "$BRANCH_NAME" \
+            --arg author "$COMMIT_AUTHOR" \
+            --arg commit "[$SHORT_SHA] $CLEAN_MSG" \
+            --arg run_url "$RUN_URL" \
+            --arg ts "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            '{
+              username: "GSPE CI/CD Bot",
+              avatar_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+              embeds: [
+                {
+                  title: $title,
+                  description: $desc,
+                  color: ($color | tonumber),
+                  fields: [
+                    { name: "Repository", value: $repo, inline: true },
+                    { name: "Branch", value: $branch, inline: true },
+                    { name: "Author", value: $author, inline: true },
+                    { name: "Commit", value: $commit, inline: false },
+                    { name: "Pipeline Logs", value: ("[Lihat Detail Run di GitHub Actions](" + $run_url + ")"), inline: false }
+                  ],
+                  footer: { text: "GSPE DevOps Enterprise · Containment Server" },
+                  timestamp: $ts
+                }
+              ]
+            }')
+
+          curl -s -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK"
