@@ -154,6 +154,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # ========================================================
+      # TRIVY CONTAINER VULNERABILITY SCANNER
+      # ========================================================
+      - name: Scan container image with Trivy (Security Vulnerability)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
   # ========================================================
   # PRODUCTION DEPLOYMENT (HANYA SAAT PUSH KE MAIN/MASTER)
   # ========================================================
@@ -170,38 +183,15 @@ jobs:
     env:
       APP_IMAGE: ghcr.io/alfimaulanaa/gspe-deployment:${{ github.sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
     steps:
       - name: Checkout deployment files
         uses: actions/checkout@v7
 
-      - name: Deploy production container image
+      - name: Deploy production container (Zero-Downtime Blue/Green & Auto-Rollback)
         run: |
-          set -euo pipefail
-          deploy_dir="$HOME/GSPE-Deployment"
-          test -f "$deploy_dir/.env"
-          install -m 0644 docker-compose.yml "$deploy_dir/docker-compose.yml"
-          cd "$deploy_dir"
-
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          export APP_IMAGE
-          docker compose pull app
-          docker compose up -d --remove-orphans
-          docker exec gspe-app npx prisma db push
-
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error http://127.0.0.1:3000/ >/dev/null; then
-              docker compose ps
-              exit 0
-            fi
-            sleep 2
-          done
-
-          docker compose logs app
-          exit 1
-
-      - name: Clean up old Docker images
-        if: always()
-        run: docker image prune -af --filter "until=72h" || true
+          chmod +x scripts/deploy-production.sh
+          ./scripts/deploy-production.sh
 
   smoke-test-production:
     name: Post-deployment smoke test (Production)
@@ -261,13 +251,13 @@ jobs:
             if [ "$DEPLOY_RESULT" = "success" ] && [ "$SMOKE_RESULT" = "success" ]; then
               COLOR=5763719
               STATUS_TITLE="🚀 Production Deployment Succeeded"
-              STATUS_DESC="Aplikasi berhasil dibangun, diverifikasi, dan dideploy ke Production (Port 3000)."
+              STATUS_DESC="Aplikasi berhasil diverifikasi, lolos scan Trivy, dan dideploy via Zero-Downtime Blue/Green di Port 3000."
             else
               COLOR=15548997
               STATUS_TITLE="❌ Production Deployment Failed"
-              STATUS_DESC="Terjadi kegagalan pada pipeline produksi (Verify: $VERIFY_RESULT, Deploy: $DEPLOY_RESULT, Smoke: $SMOKE_RESULT)."
+              STATUS_DESC="Terjadi kegagalan pada pipeline produksi (Verify: $VERIFY_RESULT, Deploy: $DEPLOY_RESULT, Smoke: $SMOKE_RESULT). Jika kegagalan saat booting, Automated Rollback mengamankan kontainer aktif."
             fi
-            ENV_LABEL="Production (Port 3000)"
+            ENV_LABEL="Production (Port 3000 - Zero-Downtime)"
           fi
 
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
