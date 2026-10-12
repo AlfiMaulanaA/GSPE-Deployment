@@ -116,10 +116,13 @@ jobs:
         with:
           category: /language:javascript-typescript
 
+  # ========================================================
+  # BUILD & PUBLISH CONTAINER (HANYA SAAT PUSH KE MAIN/MASTER)
+  # ========================================================
   build-and-push:
     name: Build and publish container
     needs: [verify, codeql]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -128,15 +131,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-
-      - name: Determine container image tags
-        id: meta
-        run: |
-          if [ "${{ github.ref }}" = "refs/heads/staging" ]; then
-            echo "tags=${{ env.IMAGE_NAME }}:staging,${{ env.IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tags=${{ env.IMAGE_NAME }}:latest,${{ env.IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -154,72 +148,20 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   # ========================================================
-  # STAGING DEPLOYMENT (Dipicu HANYA saat push ke staging)
-  # ========================================================
-  deploy-staging:
-    name: Deploy to Staging Server
-    needs: build-and-push
-    if: github.ref == 'refs/heads/staging'
-    runs-on: [self-hosted, linux, X64, staging]
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: read
-    env:
-      APP_IMAGE: ghcr.io/alfimaulanaa/gspe-deployment:${{ github.sha }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout deployment files
-        uses: actions/checkout@v7
-
-      - name: Deploy staging container image
-        run: |
-          set -euo pipefail
-          deploy_dir="$HOME/GSPE-Deployment-Staging"
-          mkdir -p "$deploy_dir"
-          test -f "$deploy_dir/.env"
-          install -m 0644 docker-compose.staging.yml "$deploy_dir/docker-compose.yml"
-          cd "$deploy_dir"
-
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          export APP_IMAGE
-          docker compose pull app
-          docker compose up -d --remove-orphans
-          docker exec gspe-app-staging npx prisma db push
-
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error http://127.0.0.1:3001/ >/dev/null; then
-              docker compose ps
-              exit 0
-            fi
-            sleep 2
-          done
-
-          docker compose logs app
-          exit 1
-
-  smoke-test-staging:
-    name: Post-deployment smoke test (Staging)
-    needs: deploy-staging
-    uses: ./.github/workflows/performance-test.yml
-    with:
-      target_url: http://127.0.0.1:3001
-      profile: smoke
-      runner_tag: staging
-
-  # ========================================================
-  # PRODUCTION DEPLOYMENT (Dipicu HANYA saat push ke main)
+  # PRODUCTION DEPLOYMENT (HANYA SAAT PUSH KE MAIN/MASTER)
   # ========================================================
   deploy-production:
     name: Deploy to Production Server
     needs: build-and-push
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    runs-on: [self-hosted, linux, X64, production]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: [self-hosted, linux, X64, deployment]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -256,6 +198,10 @@ jobs:
           docker compose logs app
           exit 1
 
+      - name: Clean up old Docker images
+        if: always()
+        run: docker image prune -af --filter "until=72h" || true
+
   smoke-test-production:
     name: Post-deployment smoke test (Production)
     needs: deploy-production
@@ -263,19 +209,16 @@ jobs:
     with:
       target_url: http://127.0.0.1:3000
       profile: smoke
-      runner_tag: production
 
   # ========================================================
-  # NOTIFIKASI DISCORD
+  # NOTIFIKASI DISCORD (PUSH KE MAIN ATAU STAGING)
   # ========================================================
   notify:
-    name: Discord Deployment Notification
+    name: Discord CI/CD Notification
     needs:
       - verify
       - codeql
       - build-and-push
-      - deploy-staging
-      - smoke-test-staging
       - deploy-production
       - smoke-test-production
     if: always() && github.event_name == 'push'
@@ -285,13 +228,11 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           BRANCH_NAME: ${{ github.ref_name }}
-          STAGING_DEPLOY: ${{ needs.deploy-staging.result }}
-          STAGING_SMOKE: ${{ needs.smoke-test-staging.result }}
-          PROD_DEPLOY: ${{ needs.deploy-production.result }}
-          PROD_SMOKE: ${{ needs.smoke-test-production.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
           CODEQL_RESULT: ${{ needs.codeql.result }}
           BUILD_RESULT: ${{ needs.build-and-push.result }}
+          DEPLOY_RESULT: ${{ needs.deploy-production.result }}
+          SMOKE_RESULT: ${{ needs.smoke-test-production.result }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
           COMMIT_AUTHOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -302,47 +243,42 @@ jobs:
             exit 0
           fi
 
-          IS_SUCCESS="false"
-          TARGET_ENV="Unknown"
-          PORT_INFO=""
-
           if [ "$BRANCH_NAME" = "staging" ]; then
-            TARGET_ENV="Staging"
-            PORT_INFO="Port 3001"
-            if [ "$STAGING_DEPLOY" = "success" ] && [ "$STAGING_SMOKE" = "success" ]; then
-              IS_SUCCESS="true"
+            # Notifikasi Khusus Staging (Hanya Validasi CI)
+            if [ "$VERIFY_RESULT" = "success" ] && [ "$CODEQL_RESULT" = "success" ]; then
+              COLOR=5763719
+              STATUS_TITLE="✅ Staging CI Passed"
+              STATUS_DESC="Semua pemeriksaan linting, type-check, unit tests, dan security scan berhasil di branch staging. Kode siap di-merge ke main."
+            else
+              COLOR=15548997
+              STATUS_TITLE="❌ Staging CI Failed"
+              STATUS_DESC="Pemeriksaan CI di branch staging mengalami kegagalan (Verify: $VERIFY_RESULT, CodeQL: $CODEQL_RESULT)."
             fi
-          elif [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
-            TARGET_ENV="Production"
-            PORT_INFO="Port 3000"
-            if [ "$PROD_DEPLOY" = "success" ] && [ "$PROD_SMOKE" = "success" ]; then
-              IS_SUCCESS="true"
-            fi
-          fi
-
-          if [ "$IS_SUCCESS" = "true" ]; then
-            COLOR=5763719
-            STATUS_EMOJI="🚀"
-            STATUS_TITLE="Deployment Succeeded ($TARGET_ENV)"
-            STATUS_DESC="Aplikasi berhasil dibangun, diverifikasi, dan dideploy ke lingkungan $TARGET_ENV ($PORT_INFO)."
+            ENV_LABEL="Staging (CI Validation Only)"
           else
-            COLOR=15548997
-            STATUS_EMOJI="❌"
-            STATUS_TITLE="Deployment Failed ($TARGET_ENV)"
-            STATUS_DESC="Terjadi kendala pada pipeline ($TARGET_ENV). Silakan tinjau log eksekusi."
+            # Notifikasi Khusus Production (Rilis Penuh & Smoke Test)
+            if [ "$DEPLOY_RESULT" = "success" ] && [ "$SMOKE_RESULT" = "success" ]; then
+              COLOR=5763719
+              STATUS_TITLE="🚀 Production Deployment Succeeded"
+              STATUS_DESC="Aplikasi berhasil dibangun, diverifikasi, dan dideploy ke Production (Port 3000)."
+            else
+              COLOR=15548997
+              STATUS_TITLE="❌ Production Deployment Failed"
+              STATUS_DESC="Terjadi kegagalan pada pipeline produksi (Verify: $VERIFY_RESULT, Deploy: $DEPLOY_RESULT, Smoke: $SMOKE_RESULT)."
+            fi
+            ENV_LABEL="Production (Port 3000)"
           fi
 
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
           CLEAN_MSG=$(echo "$COMMIT_MSG" | head -n 1 | tr -d '"\\')
 
           PAYLOAD=$(jq -n \
-            --arg title "$STATUS_EMOJI $STATUS_TITLE" \
+            --arg title "$STATUS_TITLE" \
             --arg desc "$STATUS_DESC" \
             --arg color "$COLOR" \
             --arg repo "${{ github.repository }}" \
             --arg branch "$BRANCH_NAME" \
-            --arg env "$TARGET_ENV" \
-            --arg port "$PORT_INFO" \
+            --arg env "$ENV_LABEL" \
             --arg author "$COMMIT_AUTHOR" \
             --arg commit "[$SHORT_SHA] $CLEAN_MSG" \
             --arg run_url "$RUN_URL" \
@@ -357,7 +293,7 @@ jobs:
                   color: ($color | tonumber),
                   fields: [
                     { name: "Repository", value: $repo, inline: true },
-                    { name: "Environment", value: ($env + " (" + $port + ")"), inline: true },
+                    { name: "Pipeline Role", value: $env, inline: true },
                     { name: "Branch", value: $branch, inline: true },
                     { name: "Author", value: $author, inline: true },
                     { name: "Commit", value: $commit, inline: false },
