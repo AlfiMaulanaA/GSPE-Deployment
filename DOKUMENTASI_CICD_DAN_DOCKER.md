@@ -266,3 +266,31 @@ Panduan lengkap, langkah demi langkah, dan panduan perintah praktis untuk memasa
    sudo ./svc.sh status
    ```
 
+---
+
+## 📱 8. Panduan Telegram CLI Notifier (`scripts/telegram-cli.sh`)
+
+Sistem dilengkapi utilitas CLI mandiri untuk mengirim pesan dari terminal lokal maupun server langsung ke Telegram.
+
+### 📌 Cara Penggunaan:
+1. **Kirim Pesan Sederhana:**
+   ```bash
+   ./scripts/telegram-cli.sh "Halo, server containment aktif."
+   # atau via npm script:
+   npm run telegram:send -- "Halo, server containment aktif."
+   ```
+
+2. **Kirim Pesan Terformat Profesional (Dengan Judul & Status):**
+   ```bash
+   ./scripts/telegram-cli.sh -t "DATABASE BACKUP" -m "Backup otomatis telah disimpan ke /backups." -s SUCCESS
+   ```
+
+3. **Pilihan Argumen (Flags):**
+   * `-m, --message TEXT` : Isi pesan teks.
+   * `-t, --title TITLE`  : Header judul pesan.
+   * `-s, --status STATUS` : Label status (`SUCCESS`, `FAILED`, `INFO`, `WARNING`).
+   * `-c, --chat-id ID`   : Custom chat ID tujuan (default: `TELEGRAM_CHAT_ID`).
+   * `--silent`           : Kirim senyap tanpa membunyikan nada dering.
+   * `-h, --help`         : Tampilkan panduan lengkap CLI.
+
+
