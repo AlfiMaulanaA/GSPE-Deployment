@@ -249,10 +249,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ========================================================
-  # NOTIFIKASI DISCORD (PUSH KE MAIN ATAU STAGING)
+  # NOTIFIKASI CI/CD (TELEGRAM BOT & DISCORD WEBHOOK)
   # ========================================================
   notify:
-    name: Discord CI/CD Notification
+    name: CI/CD Notification (Telegram & Discord)
     needs:
       - verify
       - codeql
@@ -264,8 +264,10 @@ jobs:
     if: always() && github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
-      - name: Send Discord notification
+      - name: Send Notification
         env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           BRANCH_NAME: ${{ github.ref_name }}
           VERIFY_RESULT: ${{ needs.verify.result }}
@@ -279,78 +281,101 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
           RELEASE_TAG: ${{ needs.tag-version.outputs.version }}
         run: |
-          if [ -z "$DISCORD_WEBHOOK" ]; then
-            echo "DISCORD_WEBHOOK secret is not configured, skipping notification."
-            exit 0
-          fi
+          SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
+          CLEAN_MSG=$(echo "$COMMIT_MSG" | head -n 1 | tr -d '"\\')
+          TAG_VAL="${RELEASE_TAG:-$SHORT_SHA}"
 
           if [ "$BRANCH_NAME" = "staging" ]; then
-            # Notifikasi Khusus Staging (Hanya Validasi CI)
             if [ "$VERIFY_RESULT" = "success" ] && [ "$CODEQL_RESULT" = "success" ]; then
-              COLOR=5763719
               STATUS_TITLE="✅ Staging CI Passed"
               STATUS_DESC="Semua pemeriksaan linting, type-check, unit tests, dan security scan berhasil di branch staging. Kode siap di-merge ke main."
+              COLOR=5763719
             else
-              COLOR=15548997
               STATUS_TITLE="❌ Staging CI Failed"
               STATUS_DESC="Pemeriksaan CI di branch staging mengalami kegagalan (Verify: $VERIFY_RESULT, CodeQL: $CODEQL_RESULT)."
+              COLOR=15548997
             fi
             ENV_LABEL="Staging (CI Validation Only)"
           else
-            # Notifikasi Khusus Production (Rilis Penuh & Smoke Test)
             if [ "$DEPLOY_RESULT" = "success" ] && [ "$SMOKE_RESULT" = "success" ]; then
-              COLOR=5763719
               STATUS_TITLE="🚀 Production Deployment Succeeded"
               if [ -n "$RELEASE_TAG" ]; then
                 STATUS_DESC="Aplikasi versi $RELEASE_TAG berhasil dideploy via Zero-Downtime Blue/Green di Port 3000."
               else
                 STATUS_DESC="Aplikasi berhasil diverifikasi, lolos scan Trivy, dan dideploy via Zero-Downtime Blue/Green di Port 3000."
               fi
+              COLOR=5763719
             else
-              COLOR=15548997
               STATUS_TITLE="❌ Production Deployment Failed"
               STATUS_DESC="Terjadi kegagalan pada pipeline produksi (Verify: $VERIFY_RESULT, Deploy: $DEPLOY_RESULT, Smoke: $SMOKE_RESULT). Jika kegagalan saat booting, Automated Rollback mengamankan kontainer aktif."
+              COLOR=15548997
             fi
             ENV_LABEL="Production (Port 3000 - Zero-Downtime)"
           fi
 
-          SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
-          CLEAN_MSG=$(echo "$COMMIT_MSG" | head -n 1 | tr -d '"\\')
-          TAG_VAL="${RELEASE_TAG:-$SHORT_SHA}"
+          # 1. SEND TO TELEGRAM BOT
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            echo "📱 Mengirim notifikasi ke Telegram..."
+            TG_MSG=$(cat <<EOF
+<b>${STATUS_TITLE}</b>
 
-          PAYLOAD=$(jq -n \
-            --arg title "$STATUS_TITLE" \
-            --arg desc "$STATUS_DESC" \
-            --arg color "$COLOR" \
-            --arg repo "${{ github.repository }}" \
-            --arg branch "$BRANCH_NAME" \
-            --arg env "$ENV_LABEL" \
-            --arg author "$COMMIT_AUTHOR" \
-            --arg tag "$TAG_VAL" \
-            --arg commit "[$SHORT_SHA] $CLEAN_MSG" \
-            --arg run_url "$RUN_URL" \
-            --arg ts "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-            '{
-              username: "GSPE CI/CD Bot",
-              avatar_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-              embeds: [
-                {
-                  title: $title,
-                  description: $desc,
-                  color: ($color | tonumber),
-                  fields: [
-                    { name: "Repository", value: $repo, inline: true },
-                    { name: "Pipeline Role", value: $env, inline: true },
-                    { name: "Branch", value: $branch, inline: true },
-                    { name: "Release / Tag", value: $tag, inline: true },
-                    { name: "Author", value: $author, inline: true },
-                    { name: "Commit", value: $commit, inline: false },
-                    { name: "Pipeline Logs", value: ("[Lihat Detail Run di GitHub Actions](" + $run_url + ")"), inline: false }
-                  ],
-                  footer: { text: "GSPE DevOps Enterprise · Containment Server" },
-                  timestamp: $ts
-                }
-              ]
-            }')
+${STATUS_DESC}
 
-          curl -s -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK"
+<b>📦 Repository:</b> <code>${{ github.repository }}</code>
+<b>⚙️ Pipeline Role:</b> ${ENV_LABEL}
+<b>🌿 Branch:</b> <code>${BRANCH_NAME}</code>
+<b>🏷️ Release / Tag:</b> <code>${TAG_VAL}</code>
+<b>👤 Author:</b> @${COMMIT_AUTHOR}
+<b>📝 Commit:</b> <code>[${SHORT_SHA}]</code> ${CLEAN_MSG}
+🔗 <a href="${RUN_URL}">Lihat Detail Run di GitHub Actions</a>
+EOF
+)
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=${TG_MSG}" \
+              -d "parse_mode=HTML" \
+              -d "disable_web_page_preview=true" || echo "Telegram notification failed."
+          else
+            echo "ℹ️ TELEGRAM_BOT_TOKEN atau TELEGRAM_CHAT_ID belum lengkap, lewati notifikasi Telegram."
+          fi
+
+          # 2. SEND TO DISCORD WEBHOOK (JIKA DIKONFIGURASI)
+          if [ -n "$DISCORD_WEBHOOK" ]; then
+            echo "💬 Mengirim notifikasi ke Discord..."
+            PAYLOAD=$(jq -n \
+              --arg title "$STATUS_TITLE" \
+              --arg desc "$STATUS_DESC" \
+              --arg color "$COLOR" \
+              --arg repo "${{ github.repository }}" \
+              --arg branch "$BRANCH_NAME" \
+              --arg env "$ENV_LABEL" \
+              --arg author "$COMMIT_AUTHOR" \
+              --arg tag "$TAG_VAL" \
+              --arg commit "[$SHORT_SHA] $CLEAN_MSG" \
+              --arg run_url "$RUN_URL" \
+              --arg ts "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+              '{
+                username: "GSPE CI/CD Bot",
+                avatar_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+                embeds: [
+                  {
+                    title: $title,
+                    description: $desc,
+                    color: ($color | tonumber),
+                    fields: [
+                      { name: "Repository", value: $repo, inline: true },
+                      { name: "Pipeline Role", value: $env, inline: true },
+                      { name: "Branch", value: $branch, inline: true },
+                      { name: "Release / Tag", value: $tag, inline: true },
+                      { name: "Author", value: $author, inline: true },
+                      { name: "Commit", value: $commit, inline: false },
+                      { name: "Pipeline Logs", value: ("[Lihat Detail Run di GitHub Actions](" + $run_url + ")"), inline: false }
+                    ],
+                    footer: { text: "GSPE DevOps Enterprise · Containment Server" },
+                    timestamp: $ts
+                  }
+                ]
+              }')
+
+            curl -s -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK" || echo "Discord notification failed."
+          fi

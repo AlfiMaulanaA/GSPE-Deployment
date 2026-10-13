@@ -135,8 +135,9 @@ Pipeline didefinisikan pada [.github/workflows/deploy.yml](file:///.github/workf
 ### 🔹 Tahap 7: Publish GitHub Release (`publish-github-release`)
 * Menggunakan `softprops/action-gh-release` untuk menerbitkan rilis resmi di GitHub lengkap dengan catatan perubahan (*auto-generated changelog*).
 
-### 🔹 Tahap 8: Discord Deployment Notification (`notify`)
+### 🔹 Tahap 8: CI/CD Notification (`notify` - Telegram Bot & Discord Webhook)
 * Berjalan otomatis (`if: always() && github.event_name == 'push'`).
+* **Multi-Channel Notification:** Mendukung pengiriman ke **Telegram Bot** (`TELEGRAM_BOT_TOKEN` & `TELEGRAM_CHAT_ID`) dan/atau **Discord Webhook** (`DISCORD_WEBHOOK`).
 * **Untuk Branch `staging`:** Mengirimkan pesan hijau `✅ Staging CI Passed` jika semua test valid, atau merah `❌ Staging CI Failed` jika ada error.
 * **Untuk Branch `main`:** Mengirimkan pesan rilis `🚀 Production Deployment Succeeded (Port 3000 - Zero-Downtime)` lengkap dengan nomor rilis SemVer (misal `Release: v1.0.1`), author, commit, dan link ke run logs.
 

@@ -27,7 +27,7 @@ export default async function Home() {
       {/* Footer System Version */}
       <footer className="mt-16 border-t border-white/5 py-8 text-center text-xs text-white/40">
         <p>
-          NexaStore Management System &middot; Version <span className="font-mono text-indigo-400 font-semibold">{appVersion}</span> &middot; Zero-Downtime High Availability
+          NexaStore Management System &middot; Version <span className="font-mono text-indigo-400 font-semibold">{appVersion}</span> &middot; Zero-Downtime High Availability &middot; Telegram Alerts
         </p>
       </footer>
       

@@ -17,6 +17,10 @@ export default function Navbar() {
               <span className="inline-flex items-center rounded-full bg-indigo-500/10 px-2 py-0.5 text-[11px] font-mono font-medium text-indigo-400 border border-indigo-500/20 shadow-sm">
                 {version}
               </span>
+              <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live System
+              </span>
             </div>
             <p className="text-[10px] uppercase tracking-[0.2em] text-white/50">Management System</p>
           </div>

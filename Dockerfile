@@ -51,8 +51,11 @@ COPY --from=builder /app/package.json ./package.json
 
 # Salin standalone build
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+LABEL org.opencontainers.image.title="NexaStore Enterprise" \
+      org.opencontainers.image.description="High-availability Next.js management system with Zero-Downtime Blue/Green CI/CD and Telegram alerts" \
+      org.opencontainers.image.authors="Alfi Maulana <alfi@gspe.co.id>"
 
 USER nextjs
 
@@ -61,3 +64,4 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]
+
